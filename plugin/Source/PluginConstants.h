@@ -1,0 +1,81 @@
+// PluginConstants.h
+// MidiChordPad Plugin Constants
+
+#pragma once
+
+#include <string>
+
+namespace PluginConstants
+{
+    // Plugin identification
+    constexpr const char* PLUGIN_NAME = "MIDI Chord Pad";
+    constexpr const char* PLUGIN_VERSION = "1.0.0";
+    constexpr const char* PLUGIN_MANUFACTURER = "MidiChordPad";
+    constexpr const char* PLUGIN_DESCRIPTION = "Generate chord progressions from single notes";
+    
+    // VST3 specific
+    constexpr const char* VST3_PLUGIN_ID = "MidiChordPad";
+    constexpr const char* VST3_CATEGORY = "Instrument|MidiEffect";
+    
+    // Parameter IDs
+    constexpr const char* PARAM_VELOCITY = "velocity";
+    constexpr const char* PARAM_OCTAVE = "octave";
+    constexpr const char* PARAM_DURATION = "duration";
+    constexpr const char* PARAM_INVERSION = "inversion";
+    constexpr const char* PARAM_HOLD_MODE = "hold_mode";
+    constexpr const char* PARAM_ROOT_NOTE = "root_note";
+    constexpr const char* PARAM_CHORD_QUALITY = "chord_quality";
+    constexpr const char* PARAM_MIDI_LEARN = "midi_learn";
+    constexpr const char* PARAM_MIDI_LEARN_ENABLED = "midiLearnEnabled";
+    constexpr const char* PARAM_MIDI_MAPPINGS = "midiMappings";
+    
+    // Maximum MIDI mappings (one for each possible note)
+    constexpr int MAX_MIDI_MAPPINGS = 128;
+    
+    // Default values
+    constexpr int DEFAULT_OCTAVE = 4;
+    constexpr int DEFAULT_VELOCITY = 100;
+    constexpr int DEFAULT_DURATION_MS = 500;
+    constexpr int DEFAULT_INVERSION = 0;
+    constexpr bool DEFAULT_HOLD_MODE = false;
+    
+    // Parameter ranges
+    constexpr int MIN_OCTAVE = 2;
+    constexpr int MAX_OCTAVE = 6;
+    constexpr int MIN_VELOCITY = 1;
+    constexpr int MAX_VELOCITY = 127;
+    constexpr int MIN_DURATION_MS = 50;
+    constexpr int MAX_DURATION_MS = 5000;
+    constexpr int MIN_INVERSION = 0;
+    constexpr int MAX_INVERSION = 3;
+    
+    // MIDI constants
+    constexpr int MIDI_NOTE_ON = 0x90;
+    constexpr int MIDI_NOTE_OFF = 0x80;
+    constexpr int MIDI_VELOCITY_CC = 0xB0;
+    
+    // Note names
+    constexpr const char* NOTE_NAMES[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    
+    // Chord qualities
+    constexpr const char* CHORD_QUALITIES[] = { 
+        "Major", 
+        "Minor", 
+        "7", 
+        "Maj7", 
+        "Min7", 
+        "Dim", 
+        "Aug", 
+        "Sus2", 
+        "Sus4",
+        "7sus4",
+        "Min7b5",
+        "6",
+        "Min6",
+        "9",
+        "Maj9"
+    };
+    
+    // Number of chord qualities
+    constexpr int NUM_CHORD_QUALITIES = 15;
+}
