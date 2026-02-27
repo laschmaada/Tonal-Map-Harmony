@@ -5,6 +5,7 @@
 #include "PluginConstants.h"
 
 #include <JuceHeader.h>
+#include <set>
 
 //==============================================================================
 // MidiChordPadEditor Implementation
@@ -124,14 +125,16 @@ void MidiChordPadEditor::resized()
     auto chordQualityBounds = m_chordQualityGroup.getLocalBounds();
     chordQualityBounds.reduce (10, 20);
     
-    // Position chord quality buttons in a grid (3 rows of 5)
-    int cqButtonWidth = chordQualityBounds.getWidth() / 5;
-    int cqButtonHeight = (chordQualityBounds.getHeight() - 10) / 3;
+    // Position chord quality buttons in a grid (3 rows of 7)
+    int numCols = 7;
+    int numRows = 3;
+    int cqButtonWidth = chordQualityBounds.getWidth() / numCols;
+    int cqButtonHeight = (chordQualityBounds.getHeight() - 10) / numRows;
     
     for (size_t i = 0; i < m_chordQualityButtons.size(); i++)
     {
-        int row = static_cast<int>(i) / 5;
-        int col = static_cast<int>(i) % 5;
+        int row = static_cast<int>(i) / numCols;
+        int col = static_cast<int>(i) % numCols;
         int x = chordQualityBounds.getX() + (col * cqButtonWidth);
         int yPos = chordQualityBounds.getY() + (row * (cqButtonHeight + 5));
         
@@ -549,9 +552,26 @@ void MidiChordPadEditor::updateMappingIndicators()
     // Update button appearances based on mappings
     const auto& mappings = m_processor.getMidiMappings();
     
+    // Check which root notes have mappings
+    std::set<int> mappedRoots;
+    for (const auto& mapping : mappings)
+    {
+        mappedRoots.insert(mapping.rootNote);
+    }
+
     // For each root note button, check if it has any mappings
     for (int i = 0; i < 12; i++)
     {
-        // Could add visual indicator for mapped notes
+        bool hasMapping = (mappedRoots.find(i) != mappedRoots.end());
+
+        if (hasMapping)
+        {
+            // Set a different color for mapped root notes
+            m_rootNoteButtons[i]->setColour(TextButton::buttonColourId, COLOUR_ACCENT.withAlpha(0.6f));
+        }
+        else
+        {
+            m_rootNoteButtons[i]->setColour(TextButton::buttonColourId, COLOUR_BUTTON);
+        }
     }
 }

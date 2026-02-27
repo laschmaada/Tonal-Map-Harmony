@@ -30,6 +30,17 @@ struct MidiMapping
 //==============================================================================
 // MIDI Output Settings
 //==============================================================================
+struct ActiveNote
+{
+    int noteNumber;
+    int channel;
+    int remainingSamples;
+    int triggerNote; // The note that triggered this chord note, for mapping/release logic
+
+    ActiveNote(int n, int c, int r, int t = -1)
+        : noteNumber(n), channel(c), remainingSamples(r), triggerNote(t) {}
+};
+
 struct MidiOutputSettings
 {
     int velocity = PluginConstants::DEFAULT_VELOCITY;
@@ -112,7 +123,7 @@ public:
     void setMidiLearnMode(bool enabled) { m_settings.midiLearnMode = enabled; }
     
     // Trigger chord output
-    void triggerChord(int rootMidiNote);
+    void triggerChord(int rootMidiNote, int triggerSourceNote = -1, int channel = 1);
     
     // Stop all playing notes
     void stopAllNotes();
@@ -164,6 +175,9 @@ private:
     int m_pendingMappingNote = -1;  // -1 means no pending mapping
     std::vector<MidiMapping> m_midiMappings;
     
+    // Active notes tracking
+    std::vector<ActiveNote> m_playingNotes;
+
     // Mapping trigger tracking (tracks which mapped notes are currently held)
     std::set<int> m_triggeredMappingNotes;
     

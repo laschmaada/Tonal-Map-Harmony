@@ -8,6 +8,8 @@
 // Include chord generation from tests
 #include "ChordTypes.h"
 
+using namespace ChordTypes;
+
 #include <JuceHeader.h>
 
 //==============================================================================
@@ -47,21 +49,21 @@ void MidiChordPadProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
 {
     m_sampleRate = sampleRate;
     m_activeNotes.clear();
+    m_playingNotes.clear();
     m_scheduledNotes.clear();
 }
 
 void MidiChordPadProcessor::releaseResources()
 {
     m_activeNotes.clear();
+    m_playingNotes.clear();
     m_scheduledNotes.clear();
 }
 
 void MidiChordPadProcessor::processBlock (MidiBuffer& midiMessages, const AudioProcessorStatus& status)
 {
-    // This is a MIDI effect - we don't process audio
-    // We receive MIDI input and generate chord output
-    
     MidiBuffer outputBuffer;
+    int numSamples = status.numSamples;
     
     // Process incoming MIDI messages
     for (const auto metadata : midiMessages)
@@ -70,28 +72,26 @@ void MidiChordPadProcessor::processBlock (MidiBuffer& midiMessages, const AudioP
         
         if (message.isNoteOn())
         {
-            // Handle note on
             int noteNumber = message.getNoteNumber();
+            int channel = message.getChannel();
             
-            // If in MIDI learn mode, capture the note for mapping
             if (m_midiLearnActive)
             {
-                // Store the incoming note as pending mapping
                 m_pendingMappingNote = noteNumber;
-                
-                // Notify editor that we're waiting for chord selection
-                // (handled via repaint or callback)
-                continue; // Don't trigger chord while in learn mode
+                continue;
+            }
+
+            // If not in hold mode, stop previous notes before starting new ones
+            if (!m_settings.holdMode)
+            {
+                stopAllNotes();
             }
             
-            // Check if there's a mapping for this note
             if (!checkAndTriggerMapping(noteNumber))
             {
-                // No mapping - trigger chord based on incoming note or current settings
-                triggerChord(noteNumber);
+                triggerChord(noteNumber, noteNumber, channel);
             }
             
-            // Add to active notes for tracking
             m_activeNotes.insert(noteNumber);
         }
         else if (message.isNoteOff())
@@ -99,44 +99,52 @@ void MidiChordPadProcessor::processBlock (MidiBuffer& midiMessages, const AudioP
             int noteNumber = message.getNoteNumber();
             m_activeNotes.erase(noteNumber);
             
-            // If this note had a mapping that was triggered, handle it
+            // Release notes triggered by this key release (mapped or unmapped)
+            // unless Hold Mode is enabled
+            if (!m_settings.holdMode)
+            {
+                for (auto& playingNote : m_playingNotes)
+                {
+                    if (playingNote.triggerNote == noteNumber)
+                    {
+                        playingNote.remainingSamples = 0; // Trigger Note-Off in next update
+                    }
+                }
+            }
+
             if (m_triggeredMappingNotes.count(noteNumber) > 0)
             {
-                // Get the mapping and stop the chord that was triggered
-                int mappingIndex = findMapping(noteNumber);
-                if (mappingIndex >= 0)
-                {
-                    const auto& mapping = m_midiMappings[mappingIndex];
-                    // Stop the chord that was triggered by this mapping
-                    // (we need to track which chord was output for this mapping)
-                }
                 m_triggeredMappingNotes.erase(noteNumber);
             }
         }
-        else if (message.isAllNotesOff())
+        else if (message.isAllNotesOff() || (message.isController() && message.getControllerNumber() == 123))
         {
-            // Stop all notes
             stopAllNotes();
-            m_triggeredMappingNotes.clear();
         }
-        else if (message.isController() && message.getControllerNumber() == 123)
+    }
+
+    // Update playing notes and generate Note-Offs
+    for (auto it = m_playingNotes.begin(); it != m_playingNotes.end();)
+    {
+        it->remainingSamples -= numSamples;
+
+        if (it->remainingSamples <= 0)
         {
-            // All notes off
-            stopAllNotes();
-            m_triggeredMappingNotes.clear();
+            // Note has expired - send Note-Off
+            MidiMessage noteOff = MidiMessage::noteOff(it->channel, it->noteNumber, (uint8)0);
+            outputBuffer.addEvent(noteOff, 0);
+            it = m_playingNotes.erase(it);
         }
-        
-        // Pass through the original MIDI (optional - for MIDI thru)
-        // outputBuffer.addEvent(message, metadata.samplePosition);
+        else
+        {
+            ++it;
+        }
     }
     
-    // Add scheduled note events (NoteOff messages)
+    // Add any immediate notes from triggerChord (Note-Ons)
     outputBuffer.addEvents(m_scheduledNotes, 0, m_scheduledNotes.getNumEvents(), 0);
-    
-    // Clear the scheduled notes after they've been added
     m_scheduledNotes.clear();
     
-    // Swap the output into the input buffer for the host
     midiMessages.swapWith(outputBuffer);
 }
 
@@ -228,56 +236,58 @@ void MidiChordPadProcessor::setStateInformation (const void* data, int sizeInByt
 // Custom methods
 //==============================================================================
 
-void MidiChordPadProcessor::triggerChord(int rootMidiNote)
+void MidiChordPadProcessor::triggerChord(int rootMidiNote, int triggerSourceNote, int channel)
 {
-    // Get root note within octave
+    // Determine the root for interval calculation
     int rootNoteInOctave = rootMidiNote % 12;
     
-    // Calculate actual octave for output
-    int outputOctave = m_settings.octave;
-    int baseMidiNote = (outputOctave * 12) + rootNoteInOctave;
+    // Calculate base MIDI note based on selected output octave
+    int baseMidiNote = ((m_settings.octave + 1) * 12) + rootNoteInOctave;
     
-    // Get chord intervals from ChordTypes
-    const auto& chordIntervals = ChordTypes::getChordIntervals(m_settings.chordQuality);
+    // Get chord intervals
+    const auto& intervals = ChordTypes::getChordIntervals(static_cast<ChordQuality>(m_settings.chordQuality));
+
+    // Prepare interval copy for inversion
+    std::vector<int> chordIntervals = intervals;
+
+    // Apply inversion
+    if (m_settings.inversion > 0 && m_settings.inversion < (int)chordIntervals.size())
+    {
+        for (int i = 0; i < m_settings.inversion; ++i)
+        {
+            chordIntervals[i] += 12;
+        }
+        std::sort(chordIntervals.begin(), chordIntervals.end());
+    }
     
-    // Calculate duration in samples
     int durationSamples = static_cast<int>((m_settings.durationMs / 1000.0) * m_sampleRate);
     
-    // Generate chord notes
     for (int interval : chordIntervals)
     {
         int noteNumber = baseMidiNote + interval;
         
-        // Apply inversion if needed
-        if (m_settings.inversion > 0 && interval > 0)
-        {
-            // Add octave for each inversion level
-            noteNumber += (m_settings.inversion * 12);
-        }
-        
-        // Clamp to valid MIDI range
         if (noteNumber >= 0 && noteNumber <= 127)
         {
-            // Add NoteOn at sample 0
-            MidiMessage noteOn (MidiMessage::noteOn (1, noteNumber, (uint8)m_settings.velocity));
-            m_scheduledNotes.addEvent (noteOn, 0);
+            // Send Note-On
+            MidiMessage noteOn = MidiMessage::noteOn(channel, noteNumber, (uint8)m_settings.velocity);
+            m_scheduledNotes.addEvent(noteOn, 0);
             
-            // Add NoteOff after duration
-            MidiMessage noteOff (MidiMessage::noteOff (1, noteNumber, (uint8)0));
-            m_scheduledNotes.addEvent (noteOff, durationSamples);
+            // Register for Note-Off tracking
+            m_playingNotes.emplace_back(noteNumber, channel, durationSamples, triggerSourceNote);
         }
     }
 }
 
 void MidiChordPadProcessor::stopAllNotes()
 {
-    // Send all notes off for all channels
-    for (int channel = 1; channel <= 16; channel++)
+    // Send Note-Off for all currently playing notes
+    for (const auto& note : m_playingNotes)
     {
-        MidiMessage allNotesOff (MidiMessage::allNotesOff (channel));
-        m_scheduledNotes.addEvent (allNotesOff, 0);
+        MidiMessage noteOff = MidiMessage::noteOff(note.channel, note.noteNumber, (uint8)0);
+        m_scheduledNotes.addEvent(noteOff, 0);
     }
     
+    m_playingNotes.clear();
     m_activeNotes.clear();
     m_triggeredMappingNotes.clear();
 }
@@ -379,6 +389,7 @@ bool MidiChordPadProcessor::checkAndTriggerMapping(int inputNote)
         return false;
     
     const auto& mapping = m_midiMappings[mappingIndex];
+    int channel = 1; // Default for mapped notes if we don't have source message
     
     // Save current settings
     int savedRootNote = m_settings.rootNote;
@@ -393,7 +404,7 @@ bool MidiChordPadProcessor::checkAndTriggerMapping(int inputNote)
     m_settings.octave = mapping.octave;
     
     // Trigger the chord
-    triggerChord(mapping.rootNote);
+    triggerChord(mapping.rootNote, inputNote, channel);
     
     // Restore original settings
     m_settings.rootNote = savedRootNote;

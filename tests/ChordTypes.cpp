@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <map>
 
+namespace ChordTypes {
+
 // Interval offsets for each chord quality (in semitones from root)
 static const std::map<ChordQuality, std::vector<int>> chordIntervals = {
     // Triads
@@ -35,6 +37,15 @@ static const std::map<ChordQuality, std::vector<int>> chordIntervals = {
     { ChordQuality::Dom7s11, {0, 4, 7, 10, 14, 18} }, // 7#11 (1, 3, 5, b7, 9, #11)
     { ChordQuality::Dom7b13, {0, 4, 7, 10, 14, 17, 20} } // 7b13 (1, 3, 5, b7, 9, 11, b13)
 };
+
+const std::vector<int>& getChordIntervals(ChordQuality quality) {
+    auto it = chordIntervals.find(quality);
+    if (it != chordIntervals.end()) {
+        return it->second;
+    }
+    static const std::vector<int> empty;
+    return empty;
+}
 
 std::vector<int> generateChord(MidiRoot root, ChordQuality quality, int inversion, int octave) {
     return generateChordInt(static_cast<int>(root), quality, inversion, octave);
@@ -80,3 +91,5 @@ std::vector<int> generateChordInt(int root, ChordQuality quality, int inversion,
     
     return result;
 }
+
+} // namespace ChordTypes

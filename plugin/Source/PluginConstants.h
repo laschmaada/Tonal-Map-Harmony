@@ -61,21 +61,27 @@ namespace PluginConstants
     constexpr const char* CHORD_QUALITIES[] = { 
         "Major", 
         "Minor", 
-        "7", 
-        "Maj7", 
-        "Min7", 
         "Dim", 
         "Aug", 
         "Sus2", 
         "Sus4",
-        "7sus4",
+        "Maj7",
+        "Min7",
+        "Dom7",
+        "Dim7",
         "Min7b5",
-        "6",
+        "Maj6",
         "Min6",
-        "9",
-        "Maj9"
+        "Add9",
+        "Dom9",
+        "Dom11",
+        "Dom13",
+        "Dom7b9",
+        "Dom7s9",
+        "Dom7s11",
+        "Dom7b13"
     };
     
     // Number of chord qualities
-    constexpr int NUM_CHORD_QUALITIES = 15;
+    constexpr int NUM_CHORD_QUALITIES = 21;
 }
