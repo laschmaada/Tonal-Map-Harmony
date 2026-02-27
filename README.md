@@ -70,7 +70,7 @@ MappingTonalHarmonyPro/
 ### ✅ MIDI Features
 
 - [x] **Velocity Control** - Adjustable output velocity (1-127)
-- [x] **Octave Shift** - Transpose chord output by octave (0-4)
+- [x] **Octave Shift** - Transpose chord output by octave (2-6)
 - [x] **Inversion Control** - Root position through 3 inversions
 - [x] **Hold Mode** - Toggle to sustain chord notes
 - [x] **MIDI Learn** - Map any MIDI CC to chord pad cells
@@ -120,8 +120,9 @@ Quick summary:
    - The mapped CC will now trigger that chord
 
 4. **Adjust Parameters**
-   - Use the vertical sliders to adjust velocity, octave, and inversion
-   - Toggle Hold mode to sustain chord notes
+   - Use the vertical sliders to adjust velocity, octave, and inversion.
+   - Toggle Hold mode to sustain chord notes.
+   - Root note buttons highlight when they have active MIDI mappings.
 
 ---
 

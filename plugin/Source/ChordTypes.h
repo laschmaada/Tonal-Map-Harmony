@@ -3,6 +3,8 @@
 
 #include <vector>
 
+namespace ChordTypes {
+
 // Enum for 12 MIDI roots: C=0, C#=1, D=2, ... B=11
 enum class MidiRoot { 
     C = 0, 
@@ -45,6 +47,11 @@ enum class ChordQuality {
 };
 
 /**
+ * Returns the semitone intervals for a given chord quality.
+ */
+const std::vector<int>& getChordIntervals(ChordQuality quality);
+
+/**
  * Generates MIDI note numbers for a given chord.
  * 
  * @param root The root note of the chord (0-11, where C=0, C#=1, etc.)
@@ -65,5 +72,7 @@ std::vector<int> generateChord(MidiRoot root, ChordQuality quality, int inversio
  * @return Vector of MIDI note numbers sorted low to high
  */
 std::vector<int> generateChordInt(int root, ChordQuality quality, int inversion, int octave);
+
+} // namespace ChordTypes
 
 #endif // CHORD_TYPES_H

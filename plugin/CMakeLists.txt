@@ -5,6 +5,7 @@
 set(PLUGIN_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginProcessor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginEditor.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ChordTypes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/juce_module.mm
 )
 
@@ -60,7 +61,6 @@ target_link_libraries(MidiChordPad PRIVATE
 # Include directories
 target_include_directories(MidiChordPad PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Source
-    ${CMAKE_CURRENT_SOURCE_DIR}/../tests
 )
 
 # Compiler definitions
