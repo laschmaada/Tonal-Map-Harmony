@@ -57,25 +57,31 @@ namespace PluginConstants
     // Note names
     constexpr const char* NOTE_NAMES[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
     
-    // Chord qualities
-    constexpr const char* CHORD_QUALITIES[] = { 
-        "Major", 
-        "Minor", 
-        "7", 
-        "Maj7", 
-        "Min7", 
-        "Dim", 
-        "Aug", 
-        "Sus2", 
-        "Sus4",
-        "7sus4",
-        "Min7b5",
-        "6",
-        "Min6",
-        "9",
-        "Maj9"
+    // Chord qualities - MUST stay in the same order as ChordQuality in ChordTypes.h
+    constexpr const char* CHORD_QUALITIES[] = {
+        "Major",      // 0  Major
+        "Minor",      // 1  Minor
+        "Dim",        // 2  Dim
+        "Aug",        // 3  Aug
+        "Sus2",       // 4  Sus2
+        "Sus4",       // 5  Sus4
+        "Maj7",       // 6  Maj7
+        "Min7",       // 7  Min7
+        "Dom7",       // 8  Dom7
+        "Dim7",       // 9  Dim7
+        "Min7b5",     // 10 Min7b5
+        "Maj6",       // 11 Maj6
+        "Min6",       // 12 Min6
+        "Add9",       // 13 Add9
+        "Dom9",       // 14 Dom9
+        "Dom11",      // 15 Dom11
+        "Dom13",      // 16 Dom13
+        "Dom7b9",     // 17 Dom7b9
+        "Dom7s9",     // 18 Dom7s9
+        "Dom7s11",    // 19 Dom7s11
+        "Dom7b13"     // 20 Dom7b13
     };
-    
-    // Number of chord qualities
-    constexpr int NUM_CHORD_QUALITIES = 15;
+
+    // Number of chord qualities - keep in sync with ChordQuality enum size
+    constexpr int NUM_CHORD_QUALITIES = 21;
 }

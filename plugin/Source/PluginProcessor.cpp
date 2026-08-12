@@ -5,8 +5,8 @@
 #include "PluginEditor.h"
 #include "PluginConstants.h"
 
-// Include chord generation from tests
-#include "ChordTypes.h"
+// Chord generation (moved from tests/ChordTypes into the plugin source tree in Phase 4)
+#include "Chord/ChordTypes.h"
 
 #include <JuceHeader.h>
 
@@ -15,10 +15,11 @@
 //==============================================================================
 
 MidiChordPadProcessor::MidiChordPadProcessor()
-    : AudioProcessor (BusesProperties()
-                      .withInput ("MIDI Input", MidiChannel::midiChannel, true)
-                      .withOutput ("MIDI Output", MidiChannel::midiChannel, true))
+    : AudioProcessor (BusesProperties())
 {
+    // MIDI input/output is enabled through juce_add_plugin(NEEDS_MIDI_INPUT/OUTPUT)
+    // and the acceptsMidi()/producesMidi() overrides below. Explicit MIDI bus
+    // declarations were removed in JUCE 8 (MidiChannel::midiChannel no longer exists).
     // Initialize with defaults
     m_settings.velocity = PluginConstants::DEFAULT_VELOCITY;
     m_settings.octave = PluginConstants::DEFAULT_OCTAVE;
@@ -43,20 +44,27 @@ MidiChordPadProcessor::~MidiChordPadProcessor()
 // AudioProcessor overrides
 //==============================================================================
 
+AudioProcessorEditor* MidiChordPadProcessor::createEditor()
+{
+    return new MidiChordPadEditor (*this);
+}
+
 void MidiChordPadProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     m_sampleRate = sampleRate;
     m_activeNotes.clear();
     m_scheduledNotes.clear();
+    m_heldChordNotes.clear();
 }
 
 void MidiChordPadProcessor::releaseResources()
 {
     m_activeNotes.clear();
     m_scheduledNotes.clear();
+    m_heldChordNotes.clear();
 }
 
-void MidiChordPadProcessor::processBlock (MidiBuffer& midiMessages, const AudioProcessorStatus& status)
+void MidiChordPadProcessor::processBlock (AudioBuffer<float>& /*buffer*/, MidiBuffer& midiMessages)
 {
     // This is a MIDI effect - we don't process audio
     // We receive MIDI input and generate chord output
@@ -88,9 +96,17 @@ void MidiChordPadProcessor::processBlock (MidiBuffer& midiMessages, const AudioP
             if (!checkAndTriggerMapping(noteNumber))
             {
                 // No mapping - trigger chord based on incoming note or current settings
-                triggerChord(noteNumber);
+                std::vector<int> triggeredNotes = triggerChord(noteNumber);
+
+                // Hold mode: remember which chord notes belong to this input note
+                // so we can emit NoteOffs when the user releases the key.
+                if (m_settings.holdMode)
+                {
+                    m_heldChordNotes[noteNumber] = std::set<int>(
+                        triggeredNotes.begin(), triggeredNotes.end());
+                }
             }
-            
+
             // Add to active notes for tracking
             m_activeNotes.insert(noteNumber);
         }
@@ -98,18 +114,28 @@ void MidiChordPadProcessor::processBlock (MidiBuffer& midiMessages, const AudioP
         {
             int noteNumber = message.getNoteNumber();
             m_activeNotes.erase(noteNumber);
-            
-            // If this note had a mapping that was triggered, handle it
+
+            // Hold mode: emit NoteOffs for the chord notes held by this input
+            if (m_settings.holdMode)
+            {
+                auto it = m_heldChordNotes.find(noteNumber);
+                if (it != m_heldChordNotes.end())
+                {
+                    for (int chordNote : it->second)
+                    {
+                        if (chordNote >= 0 && chordNote <= 127)
+                        {
+                            MidiMessage noteOff (MidiMessage::noteOff (1, chordNote, (uint8)0));
+                            m_scheduledNotes.addEvent (noteOff, 0);
+                        }
+                    }
+                    m_heldChordNotes.erase(it);
+                }
+            }
+
+            // If this note had a mapping that was triggered, drop the trigger record.
             if (m_triggeredMappingNotes.count(noteNumber) > 0)
             {
-                // Get the mapping and stop the chord that was triggered
-                int mappingIndex = findMapping(noteNumber);
-                if (mappingIndex >= 0)
-                {
-                    const auto& mapping = m_midiMappings[mappingIndex];
-                    // Stop the chord that was triggered by this mapping
-                    // (we need to track which chord was output for this mapping)
-                }
                 m_triggeredMappingNotes.erase(noteNumber);
             }
         }
@@ -228,45 +254,44 @@ void MidiChordPadProcessor::setStateInformation (const void* data, int sizeInByt
 // Custom methods
 //==============================================================================
 
-void MidiChordPadProcessor::triggerChord(int rootMidiNote)
+std::vector<int> MidiChordPadProcessor::triggerChord(int rootMidiNote)
 {
-    // Get root note within octave
-    int rootNoteInOctave = rootMidiNote % 12;
-    
-    // Calculate actual octave for output
-    int outputOctave = m_settings.octave;
-    int baseMidiNote = (outputOctave * 12) + rootNoteInOctave;
-    
-    // Get chord intervals from ChordTypes
-    const auto& chordIntervals = ChordTypes::getChordIntervals(m_settings.chordQuality);
-    
-    // Calculate duration in samples
-    int durationSamples = static_cast<int>((m_settings.durationMs / 1000.0) * m_sampleRate);
-    
-    // Generate chord notes
-    for (int interval : chordIntervals)
+    // Reduce incoming MIDI note to its pitch class (0-11) and use it as the root.
+    // This matches the "press any key on a controller -> trigger chord" intent.
+    const int rootNoteInOctave = ((rootMidiNote % 12) + 12) % 12;
+
+    // Delegate the math to the well-tested ChordTypes helper so inversions,
+    // octave shifts, and note ordering are consistent with the test suite.
+    const auto chordQuality = static_cast<ChordQuality>(m_settings.chordQuality);
+    std::vector<int> notes = generateChordInt(
+        rootNoteInOctave,
+        chordQuality,
+        m_settings.inversion,
+        m_settings.octave);
+
+    // Calculate duration in samples for NoteOff events.
+    const int durationSamples = static_cast<int>((m_settings.durationMs / 1000.0) * m_sampleRate);
+
+    for (int noteNumber : notes)
     {
-        int noteNumber = baseMidiNote + interval;
-        
-        // Apply inversion if needed
-        if (m_settings.inversion > 0 && interval > 0)
-        {
-            // Add octave for each inversion level
-            noteNumber += (m_settings.inversion * 12);
-        }
-        
         // Clamp to valid MIDI range
-        if (noteNumber >= 0 && noteNumber <= 127)
+        if (noteNumber < 0 || noteNumber > 127)
+            continue;
+
+        // Add NoteOn at sample 0 (channel 1)
+        MidiMessage noteOn (MidiMessage::noteOn (1, noteNumber, (uint8)m_settings.velocity));
+        m_scheduledNotes.addEvent (noteOn, 0);
+
+        // In hold mode, defer NoteOff until the corresponding NoteOff input arrives
+        // (handled in processBlock); otherwise schedule NoteOff after duration.
+        if (!m_settings.holdMode)
         {
-            // Add NoteOn at sample 0
-            MidiMessage noteOn (MidiMessage::noteOn (1, noteNumber, (uint8)m_settings.velocity));
-            m_scheduledNotes.addEvent (noteOn, 0);
-            
-            // Add NoteOff after duration
             MidiMessage noteOff (MidiMessage::noteOff (1, noteNumber, (uint8)0));
             m_scheduledNotes.addEvent (noteOff, durationSamples);
         }
     }
+
+    return notes;
 }
 
 void MidiChordPadProcessor::stopAllNotes()
@@ -277,9 +302,10 @@ void MidiChordPadProcessor::stopAllNotes()
         MidiMessage allNotesOff (MidiMessage::allNotesOff (channel));
         m_scheduledNotes.addEvent (allNotesOff, 0);
     }
-    
+
     m_activeNotes.clear();
     m_triggeredMappingNotes.clear();
+    m_heldChordNotes.clear();
 }
 
 //==============================================================================
@@ -394,15 +420,24 @@ bool MidiChordPadProcessor::checkAndTriggerMapping(int inputNote)
     
     // Trigger the chord
     triggerChord(mapping.rootNote);
-    
+
     // Restore original settings
     m_settings.rootNote = savedRootNote;
     m_settings.chordQuality = savedChordQuality;
     m_settings.inversion = savedInversion;
     m_settings.octave = savedOctave;
-    
+
     // Track that this mapping was triggered
     m_triggeredMappingNotes.insert(inputNote);
-    
+
     return true;
+}
+
+//==============================================================================
+// Plugin entry point - required by JUCE 8 (auto-generated previously by the
+// juce_module.mm file). All plugin formats (VST3, AU, etc.) call this.
+//==============================================================================
+AudioProcessor* JUCE_CALLTYPE createPluginFilter()
+{
+    return new MidiChordPadProcessor();
 }

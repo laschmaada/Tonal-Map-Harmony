@@ -75,12 +75,12 @@ private:
     TextButton m_clearMappingsButton;
     
     // Colors
-    static constexpr Colour COLOUR_BACKGROUND = Colour (0xFF2D2D2D);
-    static constexpr Colour COLOUR_FOREGROUND = Colour (0xFFFFFFFF);
-    static constexpr Colour COLOUR_ACCENT = Colour (0xFF007ACC);
-    static constexpr Colour COLOUR_SELECTED = Colour (0xFF4CAF50);
-    static constexpr Colour COLOUR_BUTTON = Colour (0xFF3D3D3D);
-    static constexpr Colour COLOUR_BUTTON_HOVER = Colour (0xFF5D5D5D);
+    static const Colour COLOUR_BACKGROUND;
+    static const Colour COLOUR_FOREGROUND;
+    static const Colour COLOUR_ACCENT;
+    static const Colour COLOUR_SELECTED;
+    static const Colour COLOUR_BUTTON;
+    static const Colour COLOUR_BUTTON_HOVER;
 
     //==============================================================================
     // Private methods

@@ -10,6 +10,14 @@
 // MidiChordPadEditor Implementation
 //==============================================================================
 
+// Colour definitions (declared as static const in the header).
+const Colour MidiChordPadEditor::COLOUR_BACKGROUND     = Colour (0xFF2D2D2D);
+const Colour MidiChordPadEditor::COLOUR_FOREGROUND     = Colour (0xFFFFFFFF);
+const Colour MidiChordPadEditor::COLOUR_ACCENT         = Colour (0xFF007ACC);
+const Colour MidiChordPadEditor::COLOUR_SELECTED       = Colour (0xFF4CAF50);
+const Colour MidiChordPadEditor::COLOUR_BUTTON         = Colour (0xFF3D3D3D);
+const Colour MidiChordPadEditor::COLOUR_BUTTON_HOVER   = Colour (0xFF5D5D5D);
+
 MidiChordPadEditor::MidiChordPadEditor (MidiChordPadProcessor& processor)
     : AudioProcessorEditor (&processor)
     , m_processor (processor)
