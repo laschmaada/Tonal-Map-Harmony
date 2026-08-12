@@ -11,14 +11,47 @@ if errorlevel 1 (
 set "REPO_ROOT=%CD%"
 popd >nul
 
+REM =============================================================================
+REM Locate a Visual Studio installation that has the C++ x64 tools.
+REM Same logic as scripts\configure.bat. See comments there for why this
+REM is as convoluted as it is.
+REM =============================================================================
 set "VCVARS="
-if exist "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat" set "VCVARS=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-if exist "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"      set "VCVARS=C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
-if exist "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"     set "VCVARS=C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
-if exist "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat" set "VCVARS=C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat"
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+set "VS_LIST=%TEMP%\vs_list_%RANDOM%.txt"
+
+if exist "%VSWHERE%" (
+    echo [build] Querying vswhere...
+    set "VSWRAP=%TEMP%\vswhere_runner_%RANDOM%.bat"
+    >  "%VSWRAP%" echo @echo off
+    >> "%VSWRAP%" echo call "%VSWHERE%" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    call "%VSWRAP%" > "%VS_LIST%" 2>nul
+    del "%VSWRAP%" >nul 2>&1
+    for /f "usebackq delims=" %%I in ("%VS_LIST%") do (
+        if not defined VCVARS if exist "%%I\VC\Auxiliary\Build\vcvars64.bat" set "VCVARS=%%I\VC\Auxiliary\Build\vcvars64.bat"
+    )
+)
 
 if "%VCVARS%"=="" (
-    echo [build] ERROR: no Visual Studio found. Install VS 2019 or 2022 Build Tools.
+    echo [build] vswhere unavailable or returned no install; trying common VS install paths...
+    for %%R in (
+        "C:\Program Files\Microsoft Visual Studio"
+        "C:\Program Files (x86)\Microsoft Visual Studio"
+        "C:\BuildTools"
+    ) do (
+        if not defined VCVARS (
+            echo [build]   searching %%R
+            where /R %%R vcvars64.bat > "%VS_LIST%" 2>nul
+            for /f "usebackq delims=" %%I in ("%VS_LIST%") do (
+                if not defined VCVARS if exist "%%I" set "VCVARS=%%I"
+            )
+        )
+    )
+)
+del "%VS_LIST%" >nul 2>&1
+
+if "%VCVARS%"=="" (
+    echo [build] ERROR: no Visual Studio found. Install VS 2019/2022/2026 Build Tools.
     exit /b 1
 )
 
