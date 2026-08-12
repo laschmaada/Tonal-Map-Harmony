@@ -2,8 +2,9 @@
 # VST3 Plugin configuration
 
 # Tell JUCE where to find the VST3 SDK so its VST3 wrapper can include
-# the VST2 compat headers (pluginterfaces/vst2.x/vstfxstore.h). Without
-# this, master fails to build on a clean CI checkout because the
+# the VST2 compat headers (pluginterfaces/vst2.x/vstfxstore.h) and the
+# VST3 SDK's main headers (pluginterfaces/vst/vsttypes.h). Without this,
+# master fails to build on a clean CI checkout because the
 # windows-2025-vs2026 image doesn't ship the SDK.
 #
 # VST3_SDK_DIR is normally set by the CI workflow (C:\vst3sdk, cloned
@@ -32,16 +33,23 @@ juce_add_plugin(MidiChordPad
     COMPANY_EMAIL "support@midichordpad.com"
     VERSION "1.0.0"
     DESCRIPTION "MIDI Chord Pad - Generate chord progressions from single notes"
-    
+
     # VST3-specific settings
     VST3_CATEGORY "Instrument|MidiEffect"
-    
+
     # Plugin is a MIDI effect (no audio inputs/outputs)
     FORMATS VST3
-    
+
     # Enable VST3 hosting
     VST3_HOSTING ON
 )
+
+# Belt-and-braces: ensure the VST3 SDK include dir is on the plugin
+# target. juce_set_vst3_sdk_path() above creates an INTERFACE library
+# (juce_vst3_sdk) with the include dir, but the VST3-format plugin
+# target doesn't auto-link it in some JUCE 7 versions. Adding the
+# include dir directly guarantees the build finds the SDK headers.
+target_include_directories(MidiChordPad PRIVATE "${VST3_SDK_DIR}")
 
 # Link required JUCE modules (JUCE 7.0.12 module set; master was written
 # with several JUCE 8-only modules listed that don't exist in 7, breaking
