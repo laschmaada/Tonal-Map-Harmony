@@ -18,7 +18,18 @@ jobs:
         shell: cmd
         run: |
           cmake --version
-          cl 2>&1 | findstr /C:"Microsoft" || echo "cl not on PATH (vcvars64 will fix this)"
+          REM We deliberately do NOT probe for cl here: the runner image may
+          REM not have cl on PATH until vcvars64.bat is sourced, and a failed
+          REM probe would short-circuit the step. configure.bat does the
+          REM real check via its VCVARS lookup.
+
+      - name: Cache FetchContent deps
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: ${{ runner.os }}-mcp-${{ hashFiles('CMakeLists.txt', 'plugin/CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-mcp-
 
       - name: Configure
         shell: cmd
