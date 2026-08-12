@@ -31,6 +31,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-juce-
 
+      - name: Cache VST3 SDK
+        uses: actions/cache@v4
+        with:
+          path: C:\vst3sdk
+          key: vst3sdk-3.7.x
+
       - name: Install VST3 SDK
         shell: cmd
         run: |
@@ -42,16 +48,19 @@ jobs:
           if not exist "C:\vst3sdk" (
               git clone --depth=1 https://github.com/steinbergmedia/vst3sdk.git C:\vst3sdk
           )
-          echo VST3_SDK_DIR=C:\vst3sdk >> $GITHUB_ENV
+          set VST3_SDK_DIR=C:\vst3sdk
+          echo VST3_SDK_DIR=%VST3_SDK_DIR%>>%GITHUB_ENV%
 
       - name: Configure
         shell: cmd
         run: |
+          set VST3_SDK_DIR=C:\vst3sdk
           call scripts\configure.bat
 
       - name: Build
         shell: cmd
         run: |
+          set VST3_SDK_DIR=C:\vst3sdk
           call scripts\build.bat
 
       - name: Upload VST3 artifact
