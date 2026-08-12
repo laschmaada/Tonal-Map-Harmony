@@ -30,14 +30,20 @@ juce_add_plugin(MidiChordPad
     VST3_HOSTING ON
 )
 
-# NOTE on VST3 SDK: JUCE 7.0.12 (the version we fetch in the root
-# CMakeLists.txt) ships its own copy of the VST3 SDK at
-# modules/juce_audio_processors/format_types/VST3_SDK/. No external
-# SDK installation is required; calling juce_set_vst3_sdk_path() with
-# a non-VDK path actually makes the build worse because the
-# in-tree SDK is no longer used. Do not call juce_set_vst3_sdk_path.
-# The earlier CI workflow that cloned a copy of steinbergmedia/vst3sdk
-# was incorrect and has been removed.
+# JUCE 7's juce_audio_plugin_client_VST3.cpp unconditionally tries to
+# include the VST2 SDK header pluginterfaces/vst2.x/vstfxstore.h when
+# JUCE_VST3_CAN_REPLACE_VST2 is true (the default). JUCE 7's in-tree
+# VST3 SDK does NOT include a vst2.x directory, so this include would
+# always fail on a clean build with the in-tree SDK. Defining
+# JUCE_VST3_CAN_REPLACE_VST2=0 below disables the VST2 compat shim
+# (nobody loads VST3 plugins as VST2 anymore) and skips the include.
+#
+# We do NOT call juce_set_vst3_sdk_path() / juce_set_vst2_sdk_path()
+# because the in-tree VST3 SDK at
+# modules/juce_audio_processors/format_types/VST3_SDK/ is sufficient
+# for everything else the build needs, and cloning the official
+# steinbergmedia/vst3sdk repo into the runner just to provide the
+# vst2.x directory (which we then disable) was wasted bandwidth.
 
 # Link required JUCE modules (JUCE 7.0.12 module set; master was written
 # with several JUCE 8-only modules listed that don't exist in 7, breaking
@@ -65,6 +71,7 @@ target_include_directories(MidiChordPad PRIVATE
 # Compiler definitions
 target_compile_definitions(MidiChordPad PRIVATE
     JUCE_VST3_HOSTING=1
+    JUCE_VST3_CAN_REPLACE_VST2=0
     JUCER_VST3SDKVERSION_MAJOR=3
     JUCER_VST3SDKVERSION_MINOR=7
     JUCER_VST3SDKVERSION_BUILD=0
