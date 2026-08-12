@@ -1,6 +1,20 @@
 # MidiChordPad Plugin CMakeLists.txt
 # VST3 Plugin configuration
 
+# Tell JUCE where to find the VST3 SDK so its VST3 wrapper can include
+# the VST2 compat headers (pluginterfaces/vst2.x/vstfxstore.h). Without
+# this, master fails to build on a clean CI checkout because the
+# windows-2025-vs2026 image doesn't ship the SDK.
+#
+# VST3_SDK_DIR is normally set by the CI workflow (C:\vst3sdk, cloned
+# from steinbergmedia/vst3sdk). On a local dev box the user typically
+# installs the SDK under C:\vst3sdk too, but fall back to the standard
+# install location if not set.
+if(NOT VST3_SDK_DIR)
+    set(VST3_SDK_DIR "C:/vst3sdk")
+endif()
+juce_set_vst3_sdk_path("${VST3_SDK_DIR}")
+
 # Source files
 set(PLUGIN_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginProcessor.cpp
