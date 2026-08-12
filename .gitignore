@@ -40,6 +40,12 @@ jucemodules/
 *.swp
 *.swo
 
+# Tooling-local scratch
+/.claude/
+/.kilocode/
+/scripts/fix_indent.py
+
+
 # CMake
 CMakeCache.txt
 CMakeFiles/
