@@ -31,36 +31,14 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-juce-
 
-      - name: Cache VST3 SDK
-        uses: actions/cache@v4
-        with:
-          path: C:\vst3sdk
-          key: vst3sdk-3.7.x
-
-      - name: Install VST3 SDK
-        shell: cmd
-        run: |
-          REM JUCE 7's VST3 wrapper includes the VST2 SDK headers
-          REM (pluginterfaces/vst2.x/*) for backwards-compat shims, even
-          REM when only building the VST3 format. The windows-2025-vs2026
-          REM image doesn't ship the VST3 SDK, so we clone a shallow copy
-          REM and point CMake at it via VST3_SDK_DIR.
-          if not exist "C:\vst3sdk" (
-              git clone --depth=1 https://github.com/steinbergmedia/vst3sdk.git C:\vst3sdk
-          )
-          set VST3_SDK_DIR=C:\vst3sdk
-          echo VST3_SDK_DIR=%VST3_SDK_DIR%>>%GITHUB_ENV%
-
       - name: Configure
         shell: cmd
         run: |
-          set VST3_SDK_DIR=C:\vst3sdk
           call scripts\configure.bat
 
       - name: Build
         shell: cmd
         run: |
-          set VST3_SDK_DIR=C:\vst3sdk
           call scripts\build.bat
 
       - name: Upload VST3 artifact

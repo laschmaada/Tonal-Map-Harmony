@@ -1,21 +1,6 @@
 # MidiChordPad Plugin CMakeLists.txt
 # VST3 Plugin configuration
 
-# Tell JUCE where to find the VST3 SDK so its VST3 wrapper can include
-# the VST2 compat headers (pluginterfaces/vst2.x/vstfxstore.h) and the
-# VST3 SDK's main headers (pluginterfaces/vst/vsttypes.h). Without this,
-# master fails to build on a clean CI checkout because the
-# windows-2025-vs2026 image doesn't ship the SDK.
-#
-# VST3_SDK_DIR is normally set by the CI workflow (C:\vst3sdk, cloned
-# from steinbergmedia/vst3sdk). On a local dev box the user typically
-# installs the SDK under C:\vst3sdk too, but fall back to the standard
-# install location if not set.
-if(NOT VST3_SDK_DIR)
-    set(VST3_SDK_DIR "C:/vst3sdk")
-endif()
-juce_set_vst3_sdk_path("${VST3_SDK_DIR}")
-
 # Source files
 set(PLUGIN_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginProcessor.cpp
@@ -34,6 +19,7 @@ juce_add_plugin(MidiChordPad
     VERSION "1.0.0"
     DESCRIPTION "MIDI Chord Pad - Generate chord progressions from single notes"
 
+
     # VST3-specific settings
     VST3_CATEGORY "Instrument|MidiEffect"
 
@@ -44,12 +30,14 @@ juce_add_plugin(MidiChordPad
     VST3_HOSTING ON
 )
 
-# Belt-and-braces: ensure the VST3 SDK include dir is on the plugin
-# target. juce_set_vst3_sdk_path() above creates an INTERFACE library
-# (juce_vst3_sdk) with the include dir, but the VST3-format plugin
-# target doesn't auto-link it in some JUCE 7 versions. Adding the
-# include dir directly guarantees the build finds the SDK headers.
-target_include_directories(MidiChordPad PRIVATE "${VST3_SDK_DIR}")
+# NOTE on VST3 SDK: JUCE 7.0.12 (the version we fetch in the root
+# CMakeLists.txt) ships its own copy of the VST3 SDK at
+# modules/juce_audio_processors/format_types/VST3_SDK/. No external
+# SDK installation is required; calling juce_set_vst3_sdk_path() with
+# a non-VDK path actually makes the build worse because the
+# in-tree SDK is no longer used. Do not call juce_set_vst3_sdk_path.
+# The earlier CI workflow that cloned a copy of steinbergmedia/vst3sdk
+# was incorrect and has been removed.
 
 # Link required JUCE modules (JUCE 7.0.12 module set; master was written
 # with several JUCE 8-only modules listed that don't exist in 7, breaking

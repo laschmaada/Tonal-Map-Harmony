@@ -86,11 +86,5 @@ REM With vcvars64.bat sourced, cmake can auto-detect the newest installed
 REM Visual Studio generator. We do NOT fall through to a different
 REM generator on error: if the auto-detect fails the build is broken
 REM and a different -G would just leave a half-configured build dir.
-REM
-REM VST3_SDK_DIR is passed as a CMake cache variable (not just an env
-REM var) so the build is self-contained and works both from the workflow
-REM (which clones C:\vst3sdk) and from a local dev box (where the SDK
-REM may be elsewhere). The default falls back to the standard install
-REM location on Windows.
-cmake -S . -B build -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DVST3_SDK_DIR="%VST3_SDK_DIR%"
+cmake -S . -B build -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 exit /b %errorlevel%
