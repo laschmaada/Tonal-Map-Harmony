@@ -1,0 +1,44 @@
+name: Windows build + tests
+
+on:
+  push:
+    branches: [master, fix/**]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        shell: cmd
+        run: |
+          cmake --version
+          cl 2>&1 | findstr /C:"Microsoft" || echo "cl not on PATH (vcvars64 will fix this)"
+
+      - name: Configure
+        shell: cmd
+        run: |
+          call scripts\configure.bat
+
+      - name: Build
+        shell: cmd
+        run: |
+          call scripts\build.bat
+
+      - name: Run tests
+        shell: cmd
+        run: |
+          ctest --test-dir build -C Release --output-on-failure
+
+      - name: Upload VST3 artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: midi-chord-pad-vst3
+          path: build/VST3/VST3/MIDI Chord Pad.vst3
+          if-no-files-found: error

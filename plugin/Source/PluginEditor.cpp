@@ -6,10 +6,6 @@
 
 #include <JuceHeader.h>
 
-//==============================================================================
-// MidiChordPadEditor Implementation
-//==============================================================================
-
 // Colour definitions (declared as static const in the header).
 const Colour MidiChordPadEditor::COLOUR_BACKGROUND     = Colour (0xFF2D2D2D);
 const Colour MidiChordPadEditor::COLOUR_FOREGROUND     = Colour (0xFFFFFFFF);
@@ -17,6 +13,14 @@ const Colour MidiChordPadEditor::COLOUR_ACCENT         = Colour (0xFF007ACC);
 const Colour MidiChordPadEditor::COLOUR_SELECTED       = Colour (0xFF4CAF50);
 const Colour MidiChordPadEditor::COLOUR_BUTTON         = Colour (0xFF3D3D3D);
 const Colour MidiChordPadEditor::COLOUR_BUTTON_HOVER   = Colour (0xFF5D5D5D);
+const Colour MidiChordPadEditor::COLOUR_WARN           = Colour (0xFFE0A040);
+
+namespace
+{
+    constexpr int kChordColumns = 5;
+    constexpr int kChordRows = (PluginConstants::NUM_CHORD_QUALITIES + kChordColumns - 1) / kChordColumns; // ceil(21/5) = 5
+    constexpr int kChordButtonHeight = 28;
+}
 
 MidiChordPadEditor::MidiChordPadEditor (MidiChordPadProcessor& processor)
     : AudioProcessorEditor (&processor)
@@ -24,46 +28,69 @@ MidiChordPadEditor::MidiChordPadEditor (MidiChordPadProcessor& processor)
     , m_rootNoteGroup ("Root Notes")
     , m_chordQualityGroup ("Chord Quality")
     , m_settingsGroup ("Settings")
+    , m_mappingsGroup ("MIDI Mappings")
 {
-    setSize (900, 700);
-    setResizeLimits (800, 600, 1200, 900);
-    
-    // Create UI components
+    setSize (1000, 760);
+    setResizeLimits (900, 680, 1400, 1000);
+
     createRootNoteButtons();
     createChordQualityButtons();
     createSliders();
     createLabels();
-    
-    // Add to component hierarchy
+
     addAndMakeVisible (m_rootNoteGroup);
     addAndMakeVisible (m_chordQualityGroup);
     addAndMakeVisible (m_settingsGroup);
-    
-    // Set initial slider values from processor
-    const auto& settings = m_processor.getSettings();
-    m_octaveSlider.setValue (settings.octave);
-    m_velocitySlider.setValue (settings.velocity);
-    m_durationSlider.setValue (settings.durationMs);
-    m_inversionSlider.setValue (settings.inversion);
-    m_holdModeButton.setToggleState (settings.holdMode, dontSendNotification);
-    m_midiLearnButton.setToggleState (settings.midiLearnMode, dontSendNotification);
-    
-    // Set initial selection
-    updateSelectedRootNote(settings.rootNote);
-    updateSelectedChordQuality(settings.chordQuality);
-    
-    // Create clear mappings button
+    addAndMakeVisible (m_mappingsGroup);
+
+    // Populate slider/toggle initial state from processor.
+    const auto& s = m_processor.getSettings();
+    m_octaveSlider.setValue (s.octave);
+    m_velocitySlider.setValue (s.velocity);
+    m_durationSlider.setValue (s.durationMs);
+    m_inversionSlider.setValue (s.inversion);
+    m_holdModeButton.setToggleState (s.holdMode, dontSendNotification);
+    m_midiLearnButton.setToggleState (s.midiLearnMode, dontSendNotification);
+    m_inputNoteRootButton.setToggleState (s.useInputNoteAsRoot, dontSendNotification);
+    m_outputChannelSlider.setValue (s.outputChannel);
+
+    updateSelectedRootNote(s.rootNote);
+    updateSelectedChordQuality(s.chordQuality);
+
+    // Save/Cancel mapping buttons - hidden until MIDI Learn + a pending note exist.
+    m_saveMappingButton.setButtonText ("Save Mapping");
+    m_saveMappingButton.setColour (TextButton::buttonColourId, COLOUR_SELECTED);
+    m_saveMappingButton.setColour (TextButton::textColourOnId, Colours::white);
+    m_saveMappingButton.setColour (TextButton::textColourOffId, Colours::white);
+    m_saveMappingButton.onClick = [this]() { saveMappingClicked(); };
+    m_saveMappingButton.setVisible (false);
+    addAndMakeVisible (m_saveMappingButton);
+
+    m_cancelMappingButton.setButtonText ("Cancel");
+    m_cancelMappingButton.setColour (TextButton::buttonColourId, COLOUR_WARN);
+    m_cancelMappingButton.setColour (TextButton::textColourOnId, Colours::black);
+    m_cancelMappingButton.setColour (TextButton::textColourOffId, Colours::white);
+    m_cancelMappingButton.onClick = [this]() { cancelMappingClicked(); };
+    m_cancelMappingButton.setVisible (false);
+    addAndMakeVisible (m_cancelMappingButton);
+
     m_clearMappingsButton.setButtonText ("Clear All Mappings");
     m_clearMappingsButton.setColour (TextButton::buttonColourId, COLOUR_BUTTON);
-    m_clearMappingsButton.setColour (TextButton::buttonOnColourId, Colours::red);
+    m_clearMappingsButton.setColour (TextButton::buttonOnColourId, COLOUR_WARN);
     m_clearMappingsButton.setColour (TextButton::textColourOnId, Colours::white);
     m_clearMappingsButton.setColour (TextButton::textColourOffId, Colours::white);
     m_clearMappingsButton.onClick = [this]() { clearMappingsClicked(); };
-    m_clearMappingsButton.setVisible (true);
     addAndMakeVisible (m_clearMappingsButton);
-    
-    // Start timer for polling MIDI learn state
-    startTimer (50); // Poll every 50ms
+
+    // Pending mapping label - shows current selection while waiting for save.
+    m_pendingMappingLabel.setFont (Font (13.0f, Font::bold));
+    m_pendingMappingLabel.setColour (Label::textColourId, COLOUR_ACCENT);
+    m_pendingMappingLabel.setJustificationType (Justification::left);
+    m_pendingMappingLabel.setText ("No pending mapping", dontSendNotification);
+    m_pendingMappingLabel.setVisible (false);
+    addAndMakeVisible (m_pendingMappingLabel);
+
+    startTimer (50); // Poll for processor-side state changes (pending note, etc.)
 }
 
 MidiChordPadEditor::~MidiChordPadEditor()
@@ -71,288 +98,252 @@ MidiChordPadEditor::~MidiChordPadEditor()
 }
 
 //==============================================================================
-// Component overrides
+// Painting & layout
 //==============================================================================
 
 void MidiChordPadEditor::paint (Graphics& g)
 {
-    // Background
     g.fillAll (COLOUR_BACKGROUND);
-    
-    // Title
+
     g.setColour (COLOUR_FOREGROUND);
-    g.setFont (Font (24.0f, Font::bold));
-    g.drawText (PluginConstants::PLUGIN_NAME, 
-                20, 15, getWidth() - 40, 35, 
+    g.setFont (Font (22.0f, Font::bold));
+    g.drawText (PluginConstants::PLUGIN_NAME,
+                20, 12, getWidth() - 120, 28,
                 Justification::left);
-    
-    // Version
-    g.setFont (Font (14.0f));
+
+    g.setFont (Font (13.0f));
     g.setColour (Colours::grey);
     g.drawText (PluginConstants::PLUGIN_VERSION,
-                getWidth() - 80, 20, 60, 20,
+                getWidth() - 100, 16, 80, 18,
                 Justification::right);
 }
 
 void MidiChordPadEditor::resized()
 {
     auto bounds = getLocalBounds();
-    
-    // Margins
     const int margin = 15;
-    const int groupMargin = 40;
-    
-    // Calculate grid dimensions
-    int contentWidth = bounds.getWidth() - (margin * 2);
-    int y = 60;
-    
-    // Root notes group
-    m_rootNoteGroup.setBounds (margin, y, contentWidth, 120);
-    auto rootNoteBounds = m_rootNoteGroup.getLocalBounds();
-    rootNoteBounds.reduce (10, 20);
-    
-    // Position root note buttons in a grid (2 rows of 6)
-    int buttonWidth = rootNoteBounds.getWidth() / 6;
-    int buttonHeight = (rootNoteBounds.getHeight() - 10) / 2;
-    
-    for (int i = 0; i < 12; i++)
+    const int headerH = 50;
+
+    // --- Root Notes (top) ---
+    int y = headerH;
+    const int rootH = 130;
+    m_rootNoteGroup.setBounds (margin, y, getWidth() - margin * 2, rootH);
     {
-        int row = i / 6;
-        int col = i % 6;
-        int x = rootNoteBounds.getX() + (col * buttonWidth);
-        int yPos = rootNoteBounds.getY() + (row * (buttonHeight + 5));
-        
-        m_rootNoteButtons[i]->setBounds (x, yPos, buttonWidth - 2, buttonHeight);
-    }
-    
-    y += 135;
-    
-    // Chord quality group
-    m_chordQualityGroup.setBounds (margin, y, contentWidth, 140);
-    auto chordQualityBounds = m_chordQualityGroup.getLocalBounds();
-    chordQualityBounds.reduce (10, 20);
-    
-    // Position chord quality buttons in a grid (3 rows of 5)
-    int cqButtonWidth = chordQualityBounds.getWidth() / 5;
-    int cqButtonHeight = (chordQualityBounds.getHeight() - 10) / 3;
-    
-    for (size_t i = 0; i < m_chordQualityButtons.size(); i++)
-    {
-        int row = static_cast<int>(i) / 5;
-        int col = static_cast<int>(i) % 5;
-        int x = chordQualityBounds.getX() + (col * cqButtonWidth);
-        int yPos = chordQualityBounds.getY() + (row * (cqButtonHeight + 5));
-        
-        m_chordQualityButtons[i]->setBounds (x, yPos, cqButtonWidth - 2, cqButtonHeight);
-    }
-    
-    y += 155;
-    
-    // Settings group
-    m_settingsGroup.setBounds (margin, y, contentWidth, 280);
-    auto settingsBounds = m_settingsGroup.getLocalBounds();
-    settingsBounds.reduce (15, 25);
-    
-    // Layout settings in 2 columns
-    int settingsWidth = settingsBounds.getWidth() / 2;
-    int settingsHeight = settingsBounds.getHeight() / 3;
-    
-    // Left column - octave, velocity, duration
-    for (int col = 0; col < 2; col++)
-    {
-        int colX = settingsBounds.getX() + (col * settingsWidth);
-        
-        for (int row = 0; row < 3; row++)
+        auto inner = m_rootNoteGroup.getLocalBounds().reduced (10, 20);
+        const int cols = 6;
+        const int rows = 2;
+        const int w = inner.getWidth() / cols;
+        const int h = (inner.getHeight() - 8) / rows;
+        for (int i = 0; i < 12; ++i)
         {
-            int rowY = settingsBounds.getY() + (row * settingsHeight);
-            auto controlBounds = Rectangle<int> (colX + 5, rowY + 20, settingsWidth - 15, settingsHeight - 25);
-            
-            // Label at top of each control
-            Label* label = nullptr;
-            Slider* slider = nullptr;
-            
-            if (col == 0 && row == 0)
-            {
-                label = &m_octaveLabel;
-                slider = &m_octaveSlider;
-            }
-            else if (col == 0 && row == 1)
-            {
-                label = &m_velocityLabel;
-                slider = &m_velocitySlider;
-            }
-            else if (col == 0 && row == 2)
-            {
-                label = &m_durationLabel;
-                slider = &m_durationSlider;
-            }
-            else if (col == 1 && row == 0)
-            {
-                label = &m_inversionLabel;
-                slider = &m_inversionSlider;
-            }
-            else if (col == 1 && row == 1)
-            {
-                label = &m_holdModeLabel;
-            }
-            else if (col == 1 && row == 2)
-            {
-                label = &m_midiLearnLabel;
-            }
-            
-            if (label != nullptr)
-            {
-                label->setBounds (controlBounds.getX(), controlBounds.getY() - 18, controlBounds.getWidth(), 18);
-            }
-            
-            if (slider != nullptr)
-            {
-                slider->setBounds (controlBounds);
-            }
+            const int row = i / cols;
+            const int col = i % cols;
+            m_rootNoteButtons[i]->setBounds (inner.getX() + col * w,
+                                             inner.getY() + row * (h + 4),
+                                             w - 2, h);
         }
     }
-    
-    // Hold mode and MIDI learn buttons (special positioning)
-    m_holdModeButton.setBounds (settingsBounds.getX() + settingsWidth + 10, 
-                                settingsBounds.getY() + settingsHeight + 25,
-                                200, 30);
-    m_holdModeLabel.setBounds (settingsBounds.getX() + settingsWidth + 10,
-                               settingsBounds.getY() + settingsHeight,
-                               200, 20);
-    
-    m_midiLearnButton.setBounds (settingsBounds.getX() + settingsWidth + 10, 
-                                settingsBounds.getY() + (settingsHeight * 2) + 25,
-                                200, 30);
-    m_midiLearnLabel.setBounds (settingsBounds.getX() + settingsWidth + 10,
-                               settingsBounds.getY() + (settingsHeight * 2),
-                               200, 20);
-    
-    // Clear mappings button
-    m_clearMappingsButton.setBounds (settingsBounds.getX() + settingsWidth + 10,
-                                    settingsBounds.getY() + (settingsHeight * 2) + 60,
-                                    200, 25);
+    y += rootH + 8;
+
+    // --- Chord Quality (dynamic grid for 21 buttons, 5 cols x 5 rows) ---
+    const int cqRows = kChordRows;
+    const int cqGridH = cqRows * (kChordButtonHeight + 4) + 30; // +30 for label
+    m_chordQualityGroup.setBounds (margin, y, getWidth() - margin * 2, cqGridH);
+    {
+        auto inner = m_chordQualityGroup.getLocalBounds().reduced (10, 22);
+        const int w = inner.getWidth() / kChordColumns;
+        for (size_t i = 0; i < m_chordQualityButtons.size(); ++i)
+        {
+            const int row = static_cast<int>(i) / kChordColumns;
+            const int col = static_cast<int>(i) % kChordColumns;
+            m_chordQualityButtons[i]->setBounds (inner.getX() + col * w,
+                                                 inner.getY() + row * (kChordButtonHeight + 4),
+                                                 w - 2, kChordButtonHeight);
+        }
+    }
+    y += cqGridH + 8;
+
+    // --- Settings (left half of remaining area) ---
+    const int settingsH = 250;
+    m_settingsGroup.setBounds (margin, y, getWidth() / 2 - margin * 2, settingsH);
+    {
+        auto inner = m_settingsGroup.getLocalBounds().reduced (15, 28);
+        const int labelH = 18;
+        const int controlH = (inner.getHeight() - labelH * 7) / 6;
+        int cy = inner.getY();
+
+        auto placeControl = [&](Label& lbl, Component& ctrl, int height) {
+            lbl.setBounds (inner.getX(), cy, inner.getWidth(), labelH);
+            ctrl.setBounds (inner.getX(), cy + labelH, inner.getWidth(), height);
+            cy += labelH + height + 6;
+        };
+
+        placeControl (m_octaveLabel,   m_octaveSlider,           controlH);
+        placeControl (m_velocityLabel, m_velocitySlider,         controlH);
+        placeControl (m_durationLabel, m_durationSlider,         controlH);
+        placeControl (m_inversionLabel, m_inversionSlider,       controlH);
+
+        // Hold Mode + Use Input As Root toggles in two rows
+        m_holdModeLabel.setBounds (inner.getX(), cy, inner.getWidth() / 2 - 4, labelH);
+        m_holdModeButton.setBounds (inner.getX(), cy + labelH, inner.getWidth() / 2 - 4, 26);
+        m_inputNoteRootLabel.setBounds (inner.getX() + inner.getWidth() / 2 + 4, cy, inner.getWidth() / 2 - 4, labelH);
+        m_inputNoteRootButton.setBounds (inner.getX() + inner.getWidth() / 2 + 4, cy + labelH, inner.getWidth() / 2 - 4, 26);
+        cy += labelH + 26 + 6;
+
+        // Output channel slider
+        m_outputChannelLabel.setBounds (inner.getX(), cy, inner.getWidth(), labelH);
+        m_outputChannelSlider.setBounds (inner.getX(), cy + labelH, inner.getWidth(), 26);
+    }
+
+    // --- MIDI Mappings (right half) ---
+    m_mappingsGroup.setBounds (getWidth() / 2 + margin, y, getWidth() / 2 - margin * 2, settingsH);
+    {
+        auto inner = m_mappingsGroup.getLocalBounds().reduced (15, 28);
+        const int labelH = 18;
+
+        m_midiLearnLabel.setBounds (inner.getX(), inner.getY(), inner.getWidth() / 2 - 4, labelH);
+        m_midiLearnButton.setBounds (inner.getX(), inner.getY() + labelH, inner.getWidth() / 2 - 4, 26);
+
+        m_pendingMappingLabel.setBounds (inner.getX() + inner.getWidth() / 2 + 4,
+                                        inner.getY(), inner.getWidth() / 2 - 4, labelH);
+
+        m_saveMappingButton.setBounds (inner.getX(), inner.getY() + labelH + 32,
+                                       inner.getWidth() / 2 - 4, 28);
+        m_cancelMappingButton.setBounds (inner.getX() + inner.getWidth() / 2 + 4,
+                                         inner.getY() + labelH + 32,
+                                         inner.getWidth() / 2 - 4, 28);
+
+        m_clearMappingsButton.setBounds (inner.getX(), inner.getY() + labelH + 32 + 36,
+                                        inner.getWidth(), 26);
+    }
 }
 
 //==============================================================================
-// Private methods - Component Creation
+// UI construction
 //==============================================================================
 
 void MidiChordPadEditor::createRootNoteButtons()
 {
-    for (int i = 0; i < 12; i++)
+    for (int i = 0; i < 12; ++i)
     {
-        auto button = std::make_unique<TextButton> (PluginConstants::NOTE_NAMES[i]);
-        button->setRadioGroupId (1);
-        button->setClickingTogglesState (true);
-        button->setColour (TextButton::buttonColourId, COLOUR_BUTTON);
-        button->setColour (TextButton::buttonOnColourId, COLOUR_SELECTED);
-        button->setColour (TextButton::textColourOnId, Colours::white);
-        button->setColour (TextButton::textColourOffId, Colours::white);
-        
-        button->onClick = [this, i]() { onRootNoteClicked(i); };
-        
-        addAndMakeVisible (button.get());
-        m_rootNoteButtons[i] = std::move (button);
+        auto btn = std::make_unique<TextButton> (PluginConstants::NOTE_NAMES[i]);
+        btn->setRadioGroupId (1);
+        btn->setClickingTogglesState (true);
+        btn->setColour (TextButton::buttonColourId, COLOUR_BUTTON);
+        btn->setColour (TextButton::buttonOnColourId, COLOUR_SELECTED);
+        btn->setColour (TextButton::textColourOnId, Colours::white);
+        btn->setColour (TextButton::textColourOffId, Colours::white);
+        btn->onClick = [this, i]() { onRootNoteClicked(i); };
+        addAndMakeVisible (btn.get());
+        m_rootNoteButtons[i] = std::move (btn);
     }
 }
 
 void MidiChordPadEditor::createChordQualityButtons()
 {
-    for (int i = 0; i < PluginConstants::NUM_CHORD_QUALITIES; i++)
+    for (int i = 0; i < PluginConstants::NUM_CHORD_QUALITIES; ++i)
     {
-        auto button = std::make_unique<TextButton> (PluginConstants::CHORD_QUALITIES[i]);
-        button->setRadioGroupId (2);
-        button->setClickingTogglesState (true);
-        button->setColour (TextButton::buttonColourId, COLOUR_BUTTON);
-        button->setColour (TextButton::buttonOnColourId, COLOUR_ACCENT);
-        button->setColour (TextButton::textColourOnId, Colours::white);
-        button->setColour (TextButton::textColourOffId, Colours::white);
-        
-        button->onClick = [this, i]() { onChordQualityClicked(i); };
-        
-        addAndMakeVisible (button.get());
-        m_chordQualityButtons.push_back (std::move (button));
+        auto btn = std::make_unique<TextButton> (PluginConstants::CHORD_QUALITIES[i]);
+        btn->setRadioGroupId (2);
+        btn->setClickingTogglesState (true);
+        btn->setColour (TextButton::buttonColourId, COLOUR_BUTTON);
+        btn->setColour (TextButton::buttonOnColourId, COLOUR_ACCENT);
+        btn->setColour (TextButton::textColourOnId, Colours::white);
+        btn->setColour (TextButton::textColourOffId, Colours::white);
+        btn->onClick = [this, i]() { onChordQualityClicked(i); };
+        addAndMakeVisible (btn.get());
+        m_chordQualityButtons.push_back (std::move (btn));
     }
 }
 
 void MidiChordPadEditor::createSliders()
 {
-    // Octave slider (2-6)
     m_octaveSlider.setRange (PluginConstants::MIN_OCTAVE, PluginConstants::MAX_OCTAVE, 1);
     m_octaveSlider.setValue (PluginConstants::DEFAULT_OCTAVE);
     m_octaveSlider.setSliderStyle (Slider::LinearHorizontal);
     m_octaveSlider.setTextBoxStyle (Slider::TextBoxRight, true, 50, 20);
     m_octaveSlider.onValueChange = [this]() { octaveSliderChanged(); };
     addAndMakeVisible (m_octaveSlider);
-    
-    // Velocity slider (1-127)
+
     m_velocitySlider.setRange (PluginConstants::MIN_VELOCITY, PluginConstants::MAX_VELOCITY, 1);
     m_velocitySlider.setValue (PluginConstants::DEFAULT_VELOCITY);
     m_velocitySlider.setSliderStyle (Slider::LinearHorizontal);
     m_velocitySlider.setTextBoxStyle (Slider::TextBoxRight, true, 50, 20);
     m_velocitySlider.onValueChange = [this]() { velocitySliderChanged(); };
     addAndMakeVisible (m_velocitySlider);
-    
-    // Duration slider (50-5000ms)
+
     m_durationSlider.setRange (PluginConstants::MIN_DURATION_MS, PluginConstants::MAX_DURATION_MS, 10);
     m_durationSlider.setValue (PluginConstants::DEFAULT_DURATION_MS);
     m_durationSlider.setSliderStyle (Slider::LinearHorizontal);
     m_durationSlider.setTextBoxStyle (Slider::TextBoxRight, true, 60, 20);
     m_durationSlider.onValueChange = [this]() { durationSliderChanged(); };
     addAndMakeVisible (m_durationSlider);
-    
-    // Inversion slider (0-3)
+
     m_inversionSlider.setRange (PluginConstants::MIN_INVERSION, PluginConstants::MAX_INVERSION, 1);
     m_inversionSlider.setValue (PluginConstants::DEFAULT_INVERSION);
     m_inversionSlider.setSliderStyle (Slider::LinearHorizontal);
     m_inversionSlider.setTextBoxStyle (Slider::TextBoxRight, true, 30, 20);
     m_inversionSlider.onValueChange = [this]() { inversionSliderChanged(); };
     addAndMakeVisible (m_inversionSlider);
+
+    // Output channel slider: 0 = mirror input, 1-16 = fixed.
+    m_outputChannelSlider.setRange (0, 16, 1);
+    m_outputChannelSlider.setValue (0);
+    m_outputChannelSlider.setSliderStyle (Slider::LinearHorizontal);
+    m_outputChannelSlider.setTextBoxStyle (Slider::TextBoxRight, true, 50, 20);
+    m_outputChannelSlider.onValueChange = [this]() { outputChannelSliderChanged(); };
+    addAndMakeVisible (m_outputChannelSlider);
 }
 
 void MidiChordPadEditor::createLabels()
 {
-    // Styling for all labels
-    auto labelStyle = [](Label& label)
-    {
-        label.setFont (Font (14.0f));
-        label.setColour (Label::textColourId, Colours::white);
-        label.setJustificationType (Justification::left);
+    auto style = [](Label& l) {
+        l.setFont (Font (13.0f));
+        l.setColour (Label::textColourId, Colours::white);
+        l.setJustificationType (Justification::left);
     };
-    
-    labelStyle (m_rootNoteLabel);
+
+    style (m_rootNoteLabel);
     m_rootNoteLabel.setText ("Root Note", dontSendNotification);
     addAndMakeVisible (m_rootNoteLabel);
-    
-    labelStyle (m_chordQualityLabel);
+
+    style (m_chordQualityLabel);
     m_chordQualityLabel.setText ("Chord Quality", dontSendNotification);
     addAndMakeVisible (m_chordQualityLabel);
-    
-    labelStyle (m_octaveLabel);
+
+    style (m_octaveLabel);
     m_octaveLabel.setText ("Octave (C4 = Middle C)", dontSendNotification);
     addAndMakeVisible (m_octaveLabel);
-    
-    labelStyle (m_velocityLabel);
+
+    style (m_velocityLabel);
     m_velocityLabel.setText ("Velocity (1-127)", dontSendNotification);
     addAndMakeVisible (m_velocityLabel);
-    
-    labelStyle (m_durationLabel);
+
+    style (m_durationLabel);
     m_durationLabel.setText ("Duration (ms)", dontSendNotification);
     addAndMakeVisible (m_durationLabel);
-    
-    labelStyle (m_inversionLabel);
+
+    style (m_inversionLabel);
     m_inversionLabel.setText ("Inversion (0-3)", dontSendNotification);
     addAndMakeVisible (m_inversionLabel);
-    
-    labelStyle (m_holdModeLabel);
+
+    style (m_holdModeLabel);
     m_holdModeLabel.setText ("Hold Mode", dontSendNotification);
     addAndMakeVisible (m_holdModeLabel);
-    
-    labelStyle (m_midiLearnLabel);
-    m_midiLearnLabel.setText ("MIDI Learn Mode", dontSendNotification);
+
+    style (m_midiLearnLabel);
+    m_midiLearnLabel.setText ("MIDI Learn", dontSendNotification);
     addAndMakeVisible (m_midiLearnLabel);
-    
-    // Buttons
+
+    style (m_inputNoteRootLabel);
+    m_inputNoteRootLabel.setText ("Input Note as Root", dontSendNotification);
+    addAndMakeVisible (m_inputNoteRootLabel);
+
+    style (m_outputChannelLabel);
+    m_outputChannelLabel.setText ("Output Channel (0 = mirror)", dontSendNotification);
+    addAndMakeVisible (m_outputChannelLabel);
+
+    // Toggle buttons
     m_holdModeButton.setButtonText ("Hold Notes");
     m_holdModeButton.setColour (TextButton::buttonColourId, COLOUR_BUTTON);
     m_holdModeButton.setColour (TextButton::buttonOnColourId, COLOUR_SELECTED);
@@ -360,7 +351,7 @@ void MidiChordPadEditor::createLabels()
     m_holdModeButton.setColour (TextButton::textColourOffId, Colours::white);
     m_holdModeButton.onClick = [this]() { holdModeChanged(); };
     addAndMakeVisible (m_holdModeButton);
-    
+
     m_midiLearnButton.setButtonText ("Enable MIDI Learn");
     m_midiLearnButton.setColour (TextButton::buttonColourId, COLOUR_BUTTON);
     m_midiLearnButton.setColour (TextButton::buttonOnColourId, COLOUR_ACCENT);
@@ -368,88 +359,76 @@ void MidiChordPadEditor::createLabels()
     m_midiLearnButton.setColour (TextButton::textColourOffId, Colours::white);
     m_midiLearnButton.onClick = [this]() { midiLearnChanged(); };
     addAndMakeVisible (m_midiLearnButton);
+
+    m_inputNoteRootButton.setButtonText ("Pitch -> Root");
+    m_inputNoteRootButton.setColour (TextButton::buttonColourId, COLOUR_BUTTON);
+    m_inputNoteRootButton.setColour (TextButton::buttonOnColourId, COLOUR_SELECTED);
+    m_inputNoteRootButton.setColour (TextButton::textColourOnId, Colours::white);
+    m_inputNoteRootButton.setColour (TextButton::textColourOffId, Colours::white);
+    m_inputNoteRootButton.onClick = [this]() { inputNoteRootToggled(); };
+    addAndMakeVisible (m_inputNoteRootButton);
 }
 
 //==============================================================================
-// Selection Updates
+// Selection updates
 //==============================================================================
 
 void MidiChordPadEditor::updateSelectedRootNote(int index)
 {
     m_selectedRootNote = index;
     m_processor.setRootNote(index);
-    
-    // Update button states
-    for (int i = 0; i < 12; i++)
-    {
+
+    // If a mapping is in progress, update the pending mapping's root.
+    if (m_midiLearnMode && m_processor.getPendingMappingNote() >= 0)
+        m_processor.setPendingMappingRoot(index);
+
+    for (int i = 0; i < 12; ++i)
         m_rootNoteButtons[i]->setToggleState (i == index, dontSendNotification);
-    }
 }
 
 void MidiChordPadEditor::updateSelectedChordQuality(int index)
 {
     m_selectedChordQuality = index;
     m_processor.setChordQuality(index);
-    
-    // Update button states
-    for (size_t i = 0; i < m_chordQualityButtons.size(); i++)
-    {
+
+    if (m_midiLearnMode && m_processor.getPendingMappingNote() >= 0)
+        m_processor.setPendingMappingQuality(index);
+
+    for (size_t i = 0; i < m_chordQualityButtons.size(); ++i)
         m_chordQualityButtons[i]->setToggleState (static_cast<int>(i) == index, dontSendNotification);
-    }
 }
 
 //==============================================================================
-// Event Handlers
+// Event handlers
 //==============================================================================
 
 void MidiChordPadEditor::onRootNoteClicked(int noteIndex)
 {
-    // If in MIDI learn mode and waiting for chord selection, complete the mapping
-    if (m_midiLearnMode && m_pendingInputNote >= 0)
-    {
-        finishMidiLearn();
-    }
-    else
-    {
-        updateSelectedRootNote(noteIndex);
-    }
+    // PR #2 review #1: always apply the click to the UI selection, then either
+    // store it as the pending mapping's root (if a mapping is in progress) or
+    // leave it as a fresh UI selection. Never finalise the mapping on this
+    // click.
+    updateSelectedRootNote(noteIndex);
 }
 
 void MidiChordPadEditor::onChordQualityClicked(int qualityIndex)
 {
-    // If in MIDI learn mode and waiting for chord selection, complete the mapping
-    if (m_midiLearnMode && m_pendingInputNote >= 0)
-    {
-        finishMidiLearn();
-    }
-    else
-    {
-        updateSelectedChordQuality(qualityIndex);
-    }
+    updateSelectedChordQuality(qualityIndex);
 }
 
-void MidiChordPadEditor::octaveSliderChanged()
+void MidiChordPadEditor::octaveSliderChanged()    { m_processor.setOctave((int)m_octaveSlider.getValue()); }
+void MidiChordPadEditor::velocitySliderChanged()  { m_processor.setVelocity((int)m_velocitySlider.getValue()); }
+void MidiChordPadEditor::durationSliderChanged()  { m_processor.setDurationMs((int)m_durationSlider.getValue()); }
+void MidiChordPadEditor::inversionSliderChanged() { m_processor.setInversion((int)m_inversionSlider.getValue()); }
+
+void MidiChordPadEditor::outputChannelSliderChanged()
 {
-    int value = static_cast<int> (m_octaveSlider.getValue());
-    m_processor.setOctave(value);
+    m_processor.setOutputChannel((int)m_outputChannelSlider.getValue());
 }
 
-void MidiChordPadEditor::velocitySliderChanged()
+void MidiChordPadEditor::inputNoteRootToggled()
 {
-    int value = static_cast<int> (m_velocitySlider.getValue());
-    m_processor.setVelocity(value);
-}
-
-void MidiChordPadEditor::durationSliderChanged()
-{
-    int value = static_cast<int> (m_durationSlider.getValue());
-    m_processor.setDurationMs(value);
-}
-
-void MidiChordPadEditor::inversionSliderChanged()
-{
-    int value = static_cast<int> (m_inversionSlider.getValue());
-    m_processor.setInversion(value);
+    m_processor.setUseInputNoteAsRoot(m_inputNoteRootButton.getToggleState());
 }
 
 void MidiChordPadEditor::holdModeChanged()
@@ -459,107 +438,100 @@ void MidiChordPadEditor::holdModeChanged()
 
 void MidiChordPadEditor::midiLearnChanged()
 {
-    bool isEnabled = m_midiLearnButton.getToggleState();
-    
-    if (isEnabled)
-    {
+    if (m_midiLearnButton.getToggleState())
         startMidiLearn();
-    }
     else
-    {
         cancelMidiLearn();
-    }
 }
 
 void MidiChordPadEditor::clearMappingsClicked()
 {
     m_processor.clearAllMappings();
     m_midiLearnButton.setToggleState(false, dontSendNotification);
-    updateMappingIndicators();
+    cancelMidiLearn();
+}
+
+void MidiChordPadEditor::saveMappingClicked()
+{
+    if (m_processor.getPendingMappingNote() < 0) return;
+    m_processor.completeMapping(m_selectedRootNote, m_selectedChordQuality);
+    cancelMidiLearn();
+}
+
+void MidiChordPadEditor::cancelMappingClicked()
+{
+    cancelMidiLearn();
 }
 
 //==============================================================================
-// MIDI Learn Implementation
+// MIDI Learn flow
 //==============================================================================
 
 void MidiChordPadEditor::startMidiLearn()
 {
     m_midiLearnMode = true;
-    m_waitingForChordSelection = false;
-    m_pendingInputNote = -1;
-    
-    // Update button appearance
-    m_midiLearnButton.setButtonText ("Press a note...");
-    m_midiLearnButton.setColour (TextButton::buttonOnColourId, COLOUR_SELECTED); // Green
-    
     m_processor.setMidiLearnActive(true);
-}
-
-void MidiChordPadEditor::timerCallback()
-{
-    // Check if there's a pending MIDI note from the processor
-    if (m_midiLearnMode && m_pendingInputNote < 0)
-    {
-        int pendingNote = m_processor.getPendingMappingNote();
-        if (pendingNote >= 0)
-        {
-            m_pendingInputNote = pendingNote;
-            m_waitingForChordSelection = true;
-            
-            // Update button to show we're waiting for chord selection
-            m_midiLearnButton.setButtonText ("Select a chord...");
-        }
-    }
-}
-
-void MidiChordPadEditor::finishMidiLearn()
-{
-    if (m_pendingInputNote >= 0)
-    {
-        // Complete the mapping with current chord selection
-        m_processor.completeMapping(m_selectedRootNote, m_selectedChordQuality);
-        
-        // Reset UI state
-        m_midiLearnMode = false;
-        m_waitingForChordSelection = false;
-        m_pendingInputNote = -1;
-        
-        // Update button appearance
-        m_midiLearnButton.setToggleState(false, dontSendNotification);
-        m_midiLearnButton.setButtonText ("Enable MIDI Learn");
-        m_midiLearnButton.setColour (TextButton::buttonOnColourId, COLOUR_ACCENT);
-        
-        // Update mapping indicators
-        updateMappingIndicators();
-    }
+    m_midiLearnButton.setButtonText ("Press a note...");
+    m_midiLearnButton.setColour (TextButton::buttonOnColourId, COLOUR_SELECTED);
+    m_saveMappingButton.setVisible (false);
+    m_cancelMappingButton.setVisible (false);
+    m_pendingMappingLabel.setVisible (false);
 }
 
 void MidiChordPadEditor::cancelMidiLearn()
 {
     m_midiLearnMode = false;
-    m_waitingForChordSelection = false;
-    m_pendingInputNote = -1;
-    
-    // Reset button appearance
+    m_processor.setMidiLearnActive(false);
     m_midiLearnButton.setButtonText ("Enable MIDI Learn");
     m_midiLearnButton.setColour (TextButton::buttonOnColourId, COLOUR_ACCENT);
-    
-    m_processor.setMidiLearnActive(false);
+    m_midiLearnButton.setToggleState(false, dontSendNotification);
+    m_saveMappingButton.setVisible (false);
+    m_cancelMappingButton.setVisible (false);
+    m_pendingMappingLabel.setVisible (false);
+    m_pendingMappingLabel.setText ("No pending mapping", dontSendNotification);
 }
 
-bool MidiChordPadEditor::isNoteMapped(int noteNumber) const
+void MidiChordPadEditor::refreshPendingMappingUI()
 {
-    return m_processor.findMapping(noteNumber) >= 0;
-}
-
-void MidiChordPadEditor::updateMappingIndicators()
-{
-    // Update button appearances based on mappings
-    const auto& mappings = m_processor.getMidiMappings();
-    
-    // For each root note button, check if it has any mappings
-    for (int i = 0; i < 12; i++)
+    if (! m_midiLearnMode)
     {
-        // Could add visual indicator for mapped notes
+        m_saveMappingButton.setVisible (false);
+        m_cancelMappingButton.setVisible (false);
+        m_pendingMappingLabel.setVisible (false);
+        return;
     }
+
+    const int pendingNote = m_processor.getPendingMappingNote();
+    if (pendingNote < 0)
+    {
+        m_midiLearnButton.setButtonText ("Press a note...");
+        m_saveMappingButton.setVisible (false);
+        m_cancelMappingButton.setVisible (false);
+        m_pendingMappingLabel.setVisible (false);
+        return;
+    }
+
+    const int channel = m_processor.getPendingMappingChannel();
+    const int root = m_processor.getPendingMappingRoot();
+    const int quality = m_processor.getPendingMappingQuality();
+
+    m_midiLearnButton.setButtonText ("Press another note to redo");
+    m_pendingMappingLabel.setVisible (true);
+    m_pendingMappingLabel.setText (
+        "Pending: note " + String(pendingNote) +
+        "  ch " + String(channel) +
+        "  root " + String(PluginConstants::NOTE_NAMES[root]) +
+        "  quality " + String(PluginConstants::CHORD_QUALITIES[quality]),
+        dontSendNotification);
+    m_saveMappingButton.setVisible (true);
+    m_cancelMappingButton.setVisible (true);
+}
+
+//==============================================================================
+// Timer callback - polls the processor for pending-note / learn-mode changes
+//==============================================================================
+
+void MidiChordPadEditor::timerCallback()
+{
+    refreshPendingMappingUI();
 }

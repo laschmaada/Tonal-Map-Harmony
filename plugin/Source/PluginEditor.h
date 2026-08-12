@@ -14,37 +14,26 @@ class MidiChordPadEditor : public AudioProcessorEditor,
                           private Timer
 {
 public:
-public:
-    //==============================================================================
     MidiChordPadEditor (MidiChordPadProcessor&);
     ~MidiChordPadEditor() override;
 
-    //==============================================================================
-    // Component overrides
-    //==============================================================================
     void paint (Graphics&) override;
     void resized() override;
 
 private:
-    //==============================================================================
     // UI Components
-    //==============================================================================
-    
-    // Root note buttons (C, C#, D, D#, E, F, F#, G, G#, A, A#, B)
     std::array<std::unique_ptr<TextButton>, 12> m_rootNoteButtons;
-    
-    // Chord quality buttons
     std::vector<std::unique_ptr<TextButton>> m_chordQualityButtons;
-    
-    // Controls
+
     Slider m_octaveSlider;
     Slider m_velocitySlider;
     Slider m_durationSlider;
     Slider m_inversionSlider;
     ToggleButton m_holdModeButton;
     ToggleButton m_midiLearnButton;
-    
-    // Labels
+    ToggleButton m_inputNoteRootButton; // "Use input note as root" toggle
+    Slider m_outputChannelSlider;       // 0 = mirror, 1-16 = fixed
+
     Label m_rootNoteLabel;
     Label m_chordQualityLabel;
     Label m_octaveLabel;
@@ -53,70 +42,68 @@ private:
     Label m_inversionLabel;
     Label m_holdModeLabel;
     Label m_midiLearnLabel;
-    
-    // Group components
+    Label m_inputNoteRootLabel;
+    Label m_outputChannelLabel;
+    Label m_pendingMappingLabel;
+
     GroupComponent m_rootNoteGroup;
     GroupComponent m_chordQualityGroup;
     GroupComponent m_settingsGroup;
-    
-    // Reference to processor
+    GroupComponent m_mappingsGroup;
+
     MidiChordPadProcessor& m_processor;
-    
-    // Selected indices
+
     int m_selectedRootNote = 0;
     int m_selectedChordQuality = 0;
-    
-    // MIDI Learn state
+
+    // MIDI Learn flow (PR #2 review #1):
+    //  1. Click "Enable MIDI Learn" -> m_midiLearnMode = true
+    //  2. Press an input MIDI note -> processor captures it as pending
+    //  3. User clicks root + quality buttons -> updates m_pendingMappingRoot
+    //     / Quality (without finalising)
+    //  4. User clicks "Save Mapping" -> finalise
+    //  5. "Cancel Mapping" discards the pending pair
     bool m_midiLearnMode = false;
-    bool m_waitingForChordSelection = false;
-    int m_pendingInputNote = -1;
-    
-    // Clear mappings button
+    TextButton m_saveMappingButton;
+    TextButton m_cancelMappingButton;
     TextButton m_clearMappingsButton;
-    
-    // Colors
+
     static const Colour COLOUR_BACKGROUND;
     static const Colour COLOUR_FOREGROUND;
     static const Colour COLOUR_ACCENT;
     static const Colour COLOUR_SELECTED;
     static const Colour COLOUR_BUTTON;
     static const Colour COLOUR_BUTTON_HOVER;
+    static const Colour COLOUR_WARN;
 
-    //==============================================================================
-    // Private methods
-    //==============================================================================
-    
     void createRootNoteButtons();
     void createChordQualityButtons();
     void createSliders();
     void createLabels();
-    
+
     void updateSelectedRootNote(int index);
     void updateSelectedChordQuality(int index);
-    
+
     void onRootNoteClicked(int noteIndex);
     void onChordQualityClicked(int qualityIndex);
-    void onSliderValueChanged(Slider* slider);
-    
-    // Slider callbacks
+
     void octaveSliderChanged();
     void velocitySliderChanged();
     void durationSliderChanged();
     void inversionSliderChanged();
-    
-    // Button callbacks
+    void outputChannelSliderChanged();
+    void inputNoteRootToggled();
+
     void holdModeChanged();
     void midiLearnChanged();
     void clearMappingsClicked();
-    
-    // MIDI Learn methods
+    void saveMappingClicked();
+    void cancelMappingClicked();
+
     void startMidiLearn();
-    void finishMidiLearn();
     void cancelMidiLearn();
-    bool isNoteMapped(int noteNumber) const;
-    void updateMappingIndicators();
-    
-    // Timer callback
+    void refreshPendingMappingUI();
+
     void timerCallback() override;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MidiChordPadEditor)

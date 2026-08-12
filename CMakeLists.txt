@@ -57,8 +57,52 @@ target_include_directories(ChordTests PRIVATE
 )
 target_link_libraries(ChordTests PRIVATE doctest::doctest)
 
+#==============================================================================
+# Processor-level tests (PR #2 review #11).
+# Exercises MIDI routing, hold-mode ledger, scheduler, mapping capacity,
+# state restoration. Pulls in JUCE modules so the processor's base classes
+# are available.
+#==============================================================================
+add_executable(ProcessorTests
+    tests/ProcessorTests.cpp
+    plugin/Source/PluginProcessor.cpp
+    plugin/Source/PluginEditor.cpp
+    plugin/Source/Chord/ChordTypes.cpp
+)
+target_include_directories(ProcessorTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    ${CMAKE_CURRENT_SOURCE_DIR}/plugin/Source
+    ${CMAKE_CURRENT_BINARY_DIR}/plugin/MidiChordPad_artefacts/JuceLibraryCode
+)
+target_compile_definitions(ProcessorTests PRIVATE
+    JUCE_VST3_HOSTING=0
+    JUCE_USE_VST2_WRAPPER=0
+    JUCE_USE_VST2_STANDALONE=0
+    JUCE_PLUGIN_BUILD_VST3=0
+    JUCE_PLUGIN_BUILD_AU=0
+    JUCE_PLUGIN_BUILD_AAX=0
+    JUCE_PLUGIN_BUILD_LV2=0
+    JUCE_PLUGIN_BUILD_STANDALONE=0
+    JUCE_PLUGIN_BUILD_UNITY=0
+    JucePlugin_IsMidiEffect=1
+)
+target_link_libraries(ProcessorTests PRIVATE
+    doctest::doctest
+    juce::juce_audio_basics
+    juce::juce_audio_devices
+    juce::juce_audio_formats
+    juce::juce_audio_processors
+    juce::juce_core
+    juce::juce_events
+    juce::juce_graphics
+    juce::juce_gui_basics
+    juce::juce_gui_extra
+    juce::juce_data_structures
+)
+
 enable_testing()
-add_test(NAME ChordTests COMMAND ChordTests)
+add_test(NAME ChordTests      COMMAND ChordTests)
+add_test(NAME ProcessorTests  COMMAND ProcessorTests)
 
 # Print configuration info
 message(STATUS "MidiChordPad Configuration:")

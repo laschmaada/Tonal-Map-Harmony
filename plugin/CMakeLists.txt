@@ -26,6 +26,7 @@ juce_add_plugin(MidiChordPad
 
     # MIDI effect settings
     IS_SYNTH FALSE
+    IS_MIDI_EFFECT TRUE
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT TRUE
 )

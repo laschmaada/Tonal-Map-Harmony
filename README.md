@@ -70,10 +70,12 @@ MappingTonalHarmonyPro/
 ### ✅ MIDI Features
 
 - [x] **Velocity Control** - Adjustable output velocity (1-127)
-- [x] **Octave Shift** - Transpose chord output by octave (0-4)
+- [x] **Octave Shift** - Transpose chord output by octave (2-6)
 - [x] **Inversion Control** - Root position through 3 inversions
-- [x] **Hold Mode** - Toggle to sustain chord notes
-- [x] **MIDI Learn** - Map any MIDI CC to chord pad cells
+- [x] **Hold Mode** - Toggle to sustain chord notes until the input NoteOff arrives
+- [x] **MIDI Learn** - Map any incoming MIDI note (0-127) to a root + chord quality pair
+- [x] **Root Mode Toggle** - Choose whether the chord root is the incoming note's pitch class (default) or the UI-selected root
+- [x] **Output Channel Selector** - Mirror the input channel (default) or force output to a fixed channel (1-16)
 
 ### ✅ Documentation
 
@@ -82,9 +84,8 @@ MappingTonalHarmonyPro/
 
 ### ✅ Unit Tests
 
-- [x] **Chord Generation Tests** - 31 test cases covering all chord types
-- [x] **Inversion Tests** - Verify correct note ordering
-- [x] **Edge Case Tests** - Boundary conditions and error handling
+- [x] **Chord Generation Tests** - 11 test cases covering all 21 chord types and inversions (45 assertions)
+- [x] **Processor Behaviour Tests** - 13 test cases covering hold-mode ledger, persistent scheduler, MIDI learn, mapping capacity, channels, and state restoration (85 assertions)
 
 ---
 
@@ -93,35 +94,42 @@ MappingTonalHarmonyPro/
 Follow the detailed build instructions in [`docs/BUILD_WINDOWS.md`](docs/BUILD_WINDOWS.md).
 
 Quick summary:
-1. Clone with submodules (`git clone --recurse-submodules`)
-2. Open command prompt in project root
-3. Run: `cmake -B build`
-4. Open `build/MIDIChordPad.sln` in Visual Studio 2022
-5. Build the "Release" configuration
-6. Find the VST3 plugin in `build/plugin/Release/`
+1. Install Visual Studio 2019 or 2022 (Build Tools or Community) with the C++ workload.
+2. Install CMake 3.21+ (or use the one bundled with VS).
+3. From a Git-Bash or cmd shell in the project root:
+   ```cmd
+   scripts\configure.bat
+   scripts\build.bat
+   ctest --test-dir build -C Release
+   ```
+4. The VST3 plugin lands at `build/VST3/VST3/MIDI Chord Pad.vst3/`.
 
 ---
 
 ## How To Use
 
 1. **Install the Plugin**
-   - Copy `MIDIChordPad.vst3` from `build/plugin/Release/` to your VST3 plugins folder
-   - Rescan plugins in your DAW
+   - Copy the `MIDI Chord Pad.vst3` folder into your DAW's VST3 scan directory (commonly `%ProgramFiles%\Common Files\VST3\`).
+   - Rescan plugins in the DAW.
 
 2. **Basic Usage**
-   - Add MIDI Chord Pad as a MIDI FX or instrument plugin in your DAW
-   - Click on the grid to select a root note (row) and chord quality (column)
-   - Send MIDI notes to the plugin input to trigger chords
-   - Each incoming note triggers the selected chord at the output
+   - Insert MIDI Chord Pad in your DAW.
+   - In the UI, click a root note and chord quality. By default the chord root is the pitch class of the incoming MIDI note; turn off **Input Note as Root** to use the UI root instead.
+   - Send MIDI notes to the plugin input. Each incoming note triggers the selected chord (or, if a mapping exists for that note, the mapped chord).
+   - Generated chord notes mirror the input MIDI channel by default; set the **Output Channel** slider to force a fixed channel (1-16).
 
-3. **MIDI Mapping**
-   - Right-click any pad cell to enter MIDI Learn mode
-   - Move a MIDI controller to map it to that chord
-   - The mapped CC will now trigger that chord
+3. **MIDI Mapping (per-note learning)**
+   - Click **Enable MIDI Learn** in the MIDI Mappings section. The button changes to "Press a note...".
+   - Press a note on your MIDI controller. The pending mapping label shows the captured note number and channel.
+   - Click the desired root note and chord quality buttons in the UI. Each click updates the pending selection (the chord is NOT finalised yet).
+   - Click **Save Mapping** to commit, or **Cancel** to discard.
+   - Repeat for each note you want to map. Up to 128 mappings (one per input note) are stored and persisted with the host session.
+   - **Note:** the implementation learns MIDI *notes*, not CCs (PR #2 review correction). MIDI controllers that send CC# messages won't trigger a learn capture.
 
 4. **Adjust Parameters**
-   - Use the vertical sliders to adjust velocity, octave, and inversion
-   - Toggle Hold mode to sustain chord notes
+   - Use the sliders for velocity (1-127), duration (50-5000 ms), octave (2-6), and inversion (0-3).
+   - Toggle **Hold Notes** to keep the chord sounding until the input NoteOff arrives. Toggling hold off releases every currently-held chord immediately.
+   - Toggle **Input Note as Root** to switch between "incoming note pitch class = root" (default) and "use the UI-selected root".
 
 ---
 
@@ -131,7 +139,7 @@ Quick summary:
 
 - **DAW MIDI Routing Required** - The plugin requires proper MIDI routing in your DAW. Some DAWs may require additional configuration to route MIDI from your controller through the plugin to your soft synth. See [`docs/ROUTING.md`](docs/ROUTING.md) for detailed setup guides.
 
-- **MIDI Channel Configuration** - Plugin currently outputs on all MIDI channels. Single-channel output is a planned enhancement.
+- **MIDI Channel Configuration** - The plugin mirrors the input MIDI channel by default. To force a fixed output channel (1-16), set the **Output Channel** slider in the Settings section.
 
 ---
 

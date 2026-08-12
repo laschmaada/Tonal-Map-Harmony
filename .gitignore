@@ -45,8 +45,6 @@ jucemodules/
 /.kilocode/
 /scripts/fix_indent.py
 
-
-# CMake
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake

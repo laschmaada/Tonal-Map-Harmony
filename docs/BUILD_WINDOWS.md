@@ -1,180 +1,119 @@
-# Build Instructions for Windows 11
+# Build Instructions for Windows 10/11
 
-This document provides complete build instructions for the MIDI Chord Pad VST3 plugin on Windows 11 using Visual Studio 2022 and CMake.
+This document covers building the MIDI Chord Pad VST3 plugin on Windows using
+Visual Studio and CMake.
 
 ## Prerequisites
 
-Before building the plugin, ensure you have the following tools installed:
+| Tool | Version used | Notes |
+|------|--------------|-------|
+| Windows | 10 or 11 | x64 |
+| Visual Studio | 2019 or 2022 (Build Tools or Community) | The `vcvars64.bat` it ships with must be on disk |
+| CMake | 3.21+ (tested with 4.3) | Pass `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` if you see the CMP0048 warning |
+| Git | any recent | only needed if you don't vendor JUCE |
+| Internet access | during the first configure | CMake `FetchContent` downloads JUCE 8.0.4 and doctest v2.4.11 |
 
-### Visual Studio 2022 Community
+The repo does **not** vendor JUCE. The first `cmake -B build` clones JUCE into
+`build/_deps/juce-src/`, which takes a few minutes and ~250 MB.
 
-- **Download:** https://visualstudio.microsoft.com/downloads/
-- **Required Workloads:**
-  - "Desktop development with C++"
-  - "Linux and embedded development with C++" (optional but recommended)
-- **Note:** The Community edition is free for individual developers and small teams
+## Quick start
 
-### CMake 3.21+
+From a Git-Bash or cmd shell:
 
-- **Download:** https://cmake.org/download/
-- **Recommended:** Add CMake to your system PATH during installation
-- **Verification:** Run `cmake --version` in command prompt to confirm
-
-### Git
-
-- **Download:** https://git-scm.com/download/win
-- **Required for:** Cloning the repository (if not already available)
-
-## JUCE Framework Setup
-
-The CMakeLists.txt uses [FetchContent](https://cmake.org/cmake/help/latest/module/FetchContent.html) to download JUCE automatically. No manual JUCE installation is required.
-
-When you configure the project, CMake will automatically:
-1. Download the JUCE framework from GitHub
-2. Set up the proper include paths
-3. Configure the VST3 SDK
-
-## Build Steps
-
-Follow these steps to build the MIDI Chord Pad VST3 plugin:
-
-### Step 1: Open Command Prompt
-
-Open a command prompt in the project directory:
-```
-cd path\to\MappingTonalHarmonyPro
+```cmd
+scripts\configure.bat
+scripts\build.bat
+ctest --test-dir build -C Release
 ```
 
-**Important:** For best results, use the "Developer Command Prompt for VS2022" which can be found in:
-- Start Menu → Visual Studio 2022 → Developer Command Prompt for VS 2022
+The two scripts:
+- Resolve the repository root from their own location (`%~dp0..`) so they
+  work no matter where the repo is checked out.
+- Find a Visual Studio installation (try VS 2022 BuildTools / Community,
+  fall back to VS 2019 BuildTools) and source `vcvars64.bat`.
+- Run `cmake -B build -G "Visual Studio 16 2019" -A x64` with the policy
+  compat flag.
+- Build the `MidiChordPad_VST3`, `ChordTests`, and `ProcessorTests` targets
+  in Release configuration.
 
-### Step 2: Create Build Directory
+If VS is missing, the script prints an actionable error and exits.
+
+## Manual build (if you'd rather see each step)
+
+```cmd
+:: 1. Open a "x64 Native Tools Command Prompt for VS 2019/2022"
+::    (this calls vcvars64.bat for you)
+
+:: 2. From the repo root:
+cmake -B build -G "Visual Studio 16 2019" -A x64 -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake --build build --config Release --target MidiChordPad_VST3 ChordTests ProcessorTests
+
+:: 3. Run tests:
+ctest --test-dir build -C Release --output-on-failure
+```
+
+If you're on Git-Bash or want to call `vcvars64.bat` yourself:
 
 ```bash
-mkdir build
+cmd.exe /C '"C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat" && cmake -B build -G "Visual Studio 16 2019" -A x64 -DCMAKE_POLICY_VERSION_MINIMUM=3.5 && cmake --build build --config Release --target MidiChordPad_VST3 ChordTests ProcessorTests'
 ```
 
-### Step 3: Configure with CMake
+## Where the artifacts land
 
-```bash
-cmake -S . -B build -G "Visual Studio 17 2022"
-```
+| Artifact | Path |
+|---|---|
+| VST3 plugin | `build/VST3/VST3/MIDI Chord Pad.vst3/` |
+| ChordTests | `build/Release/ChordTests.exe` |
+| ProcessorTests | `build/Release/ProcessorTests.exe` |
 
-This will:
-- Configure the project using Visual Studio 2022 generator
-- Download JUCE framework automatically
-- Set up the build environment
-
-### Step 4: Build Release Version
-
-```bash
-cmake --build build --config Release
-```
-
-This compiles the plugin in Release mode for optimal performance.
-
-**Alternative - Build Debug Version:**
-```bash
-cmake --build build --config Debug
-```
-
-## Output Location
-
-After a successful build, the VST3 plugin file will be located at:
+The VST3 bundle structure follows the VST3 standard:
 
 ```
-build\plugin\Release\MidiChordPad.vst3
+MIDI Chord Pad.vst3/
+  Contents/
+    x86_64-win/
+      MIDI Chord Pad.vst3   <- the actual DLL (~3 MB)
+    Resources/
+      moduleinfo.json
 ```
 
-## Installation
+## Installing the plugin
 
-### Option 1: Manual Installation
+Copy the `MIDI Chord Pad.vst3` folder into your DAW's VST3 scan directory:
 
-Copy the generated VST3 file to your VST3 plugins folder:
+| DAW | Typical path |
+|---|---|
+| Reaper | `%ProgramFiles%\Common Files\VST3\` |
+| Cubase | `%ProgramFiles%\Common Files\VST3\` |
+| Studio One | `%ProgramFiles%\Common Files\VST3\` |
+| Ableton Live | (Live's VST3 MIDI FX support is limited; see Limitations below) |
 
-```bash
-copy build\plugin\Release\MidiChordPad.vst3 "C:\Program Files\Common Files\VST3\"
-```
+Then rescan plugins in the DAW.
 
-### Option 2: CMake Install Target
+## Targets
 
-Use CMake's install command:
+| Target | Type | What it builds |
+|---|---|---|
+| `MidiChordPad_VST3` | VST3 plugin | The actual deliverable |
+| `ChordTests` | Console app | Pure chord-generation tests (11 cases, 45 assertions) |
+| `ProcessorTests` | Console app | MIDI behaviour tests: hold mode, scheduler, mapping, channels, state restoration (13 cases, 85 assertions) |
 
-```bash
-cmake --install build --config Release
-```
+Both test targets are wired into CTest, so `ctest` runs both.
 
-This will install the plugin to the default VST3 location.
+## Known build issues
 
-## Verifying Installation
+- **"Compatibility with CMake < 3.5 has been removed"** — JUCE and doctest set
+  `cmake_minimum_required(VERSION 3.0)` and modern CMake rejects them. The
+  `-DCMAKE_POLICY_VERSION_MINIMUM=3.5` flag fixes it. The provided scripts
+  already pass this flag.
+- **No `gh` (GitHub CLI)** — only needed if you want to script PR creation
+  via the terminal. `winget install --id GitHub.cli` if you want it.
+- **VS 2019 vs VS 2022** — the build is tested with VS 2019 BuildTools
+  (v142, MSVC 14.29). VS 2022 (v143, MSVC 14.3x) works too; just point
+  the script's VCVARS search order at your install.
 
-After installation:
-1. Open your DAW (e.g., REAPER, Ableton Live)
-2. Scan for new VST3 plugins
-3. The plugin should appear as "MIDI Chord Pad" in your plugin list
+## CI
 
-## Troubleshooting
-
-### CMake Can't Find Visual Studio
-
-**Problem:** CMake reports it cannot find Visual Studio generator.
-
-**Solution:**
-- Run the command from "Developer Command Prompt for VS2022"
-- Ensure Visual Studio 2022 is properly installed with C++ workload
-- Restart your computer after installing Visual Studio
-
-### JUCE Download Fails
-
-**Problem:** CMake fails to download JUCE framework.
-
-**Solutions:**
-1. Check your internet connection
-2. If behind a proxy, configure proxy settings in CMake
-3. Alternatively, you can manually clone JUCE:
-   ```bash
-   git clone https://github.com/juce-framework/JUCE.git
-   ```
-   Then modify CMakeLists.txt to use the local copy
-
-### Build Errors Related to VST3 SDK
-
-**Problem:** Errors related to VST3 headers or SDK.
-
-**Solution:**
-- Ensure you're using JUCE version 7.0+ which includes VST3 support
-- Verify Visual Studio has the latest updates
-
-### Plugin Not Appearing in DAW
-
-**Problem:** Plugin installs but doesn't appear in DAW.
-
-**Solutions:**
-1. Verify the .vst3 file exists in the correct location
-2. Try rescanning plugins in your DAW
-3. Check if your DAW supports VST3 (most modern DAWs do)
-4. Try running your DAW as Administrator
-
-## Build Configuration Options
-
-### Custom Installation Path
-
-To install to a custom location:
-
-```bash
-cmake --install build --config Release --prefix "C:\Custom\Path\VST3"
-```
-
-### Parallel Build
-
-For faster builds on multi-core systems:
-
-```bash
-cmake --build build --config Release --parallel 4
-```
-
-## Additional Resources
-
-- [JUCE Framework Documentation](https://juce.com/learn/documentation)
-- [CMake Documentation](https://cmake.org/cmake/help/latest/)
-- [VST3 SDK Documentation](https://steinbergmedia.github.io/vst3_doc/)
+A Windows GitHub Actions workflow at `.github/workflows/windows-build.yml`
+runs `scripts\configure.bat && scripts\build.bat && ctest` on every push
+and PR. See `.github/workflows/windows-build.yml` for details.
