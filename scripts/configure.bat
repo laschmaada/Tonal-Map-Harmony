@@ -83,16 +83,8 @@ if errorlevel 1 (
 
 cd /d "%REPO_ROOT%"
 REM With vcvars64.bat sourced, cmake can auto-detect the newest installed
-REM Visual Studio generator. We pin a fallback generator only if auto-
-REM detection fails (older CMake on older hosts).
+REM Visual Studio generator. We do NOT fall through to a different
+REM generator on error: if the auto-detect fails the build is broken
+REM and a different -G would just leave a half-configured build dir.
 cmake -S . -B build -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-if errorlevel 1 (
-    cmake -S . -B build -G "Visual Studio 18 2026" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-)
-if errorlevel 1 (
-    cmake -S . -B build -G "Visual Studio 17 2022" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-)
-if errorlevel 1 (
-    cmake -S . -B build -G "Visual Studio 16 2019" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-)
 exit /b %errorlevel%

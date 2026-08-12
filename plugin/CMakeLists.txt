@@ -29,7 +29,10 @@ juce_add_plugin(MidiChordPad
     VST3_HOSTING ON
 )
 
-# Link required JUCE modules
+# Link required JUCE modules (JUCE 7.0.12 module set; master was written
+# with several JUCE 8-only modules listed that don't exist in 7, breaking
+# the build on a clean checkout. Trimmed to modules that ship with 7.0.12
+# and that this VST3 MIDI effect actually needs.)
 target_link_libraries(MidiChordPad PRIVATE
     juce::juce_audio_basics
     juce::juce_audio_devices
@@ -41,21 +44,7 @@ target_link_libraries(MidiChordPad PRIVATE
     juce::juce_graphics
     juce::juce_gui_basics
     juce::juce_gui_extra
-    juce::juce_midi_io
-    juce::juce_osc
-    juce::juce_box2d
-    juce::juce_cryptography
     juce::juce_data_structures
-    juce::juce_domains
-    juce::juce_file_utils
-    juce::juce_logging
-    juce::juce_maths
-    juce::juce_memory
-    juce::juce_text
-    juce::juce_thread
-    juce::juce_time
-    juce::juce_value_tree
-    juce::juce_audio_utils
 )
 
 # Include directories
