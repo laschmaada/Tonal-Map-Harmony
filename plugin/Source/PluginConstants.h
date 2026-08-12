@@ -84,4 +84,4 @@ namespace PluginConstants
 
     // Number of chord qualities - keep in sync with ChordQuality enum size
     constexpr int NUM_CHORD_QUALITIES = 21;
-}
+    }

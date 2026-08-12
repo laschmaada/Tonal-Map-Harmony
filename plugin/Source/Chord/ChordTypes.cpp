@@ -1,6 +1,22 @@
 #include "ChordTypes.h"
+#include "../PluginConstants.h"
 #include <algorithm>
 #include <map>
+
+// PR #2 review C1: strong compile-time guard between the ChordQuality enum
+// and the PluginConstants tables. This file is linked into all three targets
+// (MidiChordPad_VST3, ChordTests, ProcessorTests), so any drift fails the
+// build before a binary is ever produced. The asserts in ChordTypes.h catch
+// re-numbering of the enum; these two catch the array-count and the
+// declared-count going out of step with the enum range.
+static_assert(static_cast<size_t>(PluginConstants::NUM_CHORD_QUALITIES)
+                  == static_cast<size_t>(ChordQuality::Dom7b13) + 1,
+    "PluginConstants::NUM_CHORD_QUALITIES does not match ChordQuality::Dom7b13+1. "
+    "Update both: add/remove an entry in PluginConstants::CHORD_QUALITIES[] AND in "
+    "the ChordQuality enum (and in this file's chordIntervals table).");
+static_assert(sizeof(PluginConstants::CHORD_QUALITIES) / sizeof(const char*)
+                  == static_cast<size_t>(PluginConstants::NUM_CHORD_QUALITIES),
+    "PluginConstants::CHORD_QUALITIES[] array size does not match NUM_CHORD_QUALITIES");
 
 // Interval offsets for each chord quality (in semitones from root)
 static const std::map<ChordQuality, std::vector<int>> chordIntervals = {

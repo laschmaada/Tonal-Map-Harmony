@@ -85,7 +85,7 @@ MappingTonalHarmonyPro/
 ### ✅ Unit Tests
 
 - [x] **Chord Generation Tests** - 11 test cases covering all 21 chord types and inversions (45 assertions)
-- [x] **Processor Behaviour Tests** - 13 test cases covering hold-mode ledger, persistent scheduler, MIDI learn, mapping capacity, channels, and state restoration (85 assertions)
+- [x] **Processor Behaviour Tests** - 13 test cases covering hold-mode ledger, persistent scheduler, MIDI learn, mapping capacity, channels, and state restoration (64 assertions)
 
 ---
 

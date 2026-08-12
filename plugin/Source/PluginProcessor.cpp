@@ -163,10 +163,20 @@ void MidiChordPadProcessor::releaseHeldChord(MidiBuffer& out, int inputNote, int
     for (int chordNote : chordNotes)
     {
         if (chordNote < 0 || chordNote > 127) continue;
-        // Find the matching active-note entry; if found, remove it so the
-        // scheduler doesn't double-emit the NoteOff. If not found (because
-        // hold-mode was toggled off and the entry already got a scheduled
-        // NoteOff from flushAllHeldChords), emit one here anyway.
+        // PR #2 review W1: use the channel that was *actually* stored on the
+        // scheduler entry when the NoteOn was emitted. Re-deriving it from
+        // m_settings.outputChannel here would mismatch if the user changed
+        // the output channel between the NoteOn and the NoteOff.
+        //
+        // Fallback (no scheduler match) note: this branch only fires when
+        // flushAllHeldChords() ran between the NoteOn and the NoteOff - the
+        // user toggled hold off while notes were still held. In that case we
+        // use inputChannel as a best-effort; the alternative is to read the
+        // current m_settings.outputChannel, but that would mismatch a chord
+        // that was triggered with the old setting just as badly. The
+        // mid-hold output-channel change is the more common case to get
+        // right, hence the storage-on-NoteOn design.
+        int outChannel = juce::jlimit(1, 16, inputChannel);
         bool removedFromScheduler = false;
         for (auto ait = m_activeNotes.begin(); ait != m_activeNotes.end(); ++ait)
         {
@@ -175,19 +185,13 @@ void MidiChordPadProcessor::releaseHeldChord(MidiBuffer& out, int inputNote, int
                 && ait->sourceChannel == inputChannel
                 && ait->remainingSamples < 0) // is a hold entry
             {
+                outChannel = juce::jlimit(1, 16, ait->channel);
                 m_activeNotes.erase(ait);
                 removedFromScheduler = true;
                 break;
             }
         }
-        (void)removedFromScheduler;
-
-        // Resolve the output channel for this NoteOff. If we removed the
-        // scheduler entry we know the channel from m_settings; otherwise we
-        // look it up in the remaining active notes.
-        int outChannel = (m_settings.outputChannel > 0)
-            ? juce::jlimit(1, 16, m_settings.outputChannel)
-            : juce::jlimit(1, 16, inputChannel);
+        (void)removedFromScheduler; // S2: kept as a diagnostic hook for future logging
 
         MidiMessage noteOff (MidiMessage::noteOff (outChannel, chordNote, (uint8)0));
         out.addEvent (noteOff, sampleOffset);
@@ -262,8 +266,12 @@ void MidiChordPadProcessor::scheduleNoteOn(MidiBuffer& out, int note, int channe
 
 void MidiChordPadProcessor::triggerChord(MidiBuffer& out, int inputNote, int inputChannel, int sampleOffset)
 {
-    const int pitchClass = ((inputNote % 12) + 12) % 12;
-    const int root = m_settings.useInputNoteAsRoot ? pitchClass : m_settings.rootNote;
+    // PR #2 review S3: pitch class is only needed when the chord root
+    // follows the input note; compute it lazily to keep the common path
+    // (useInputNoteAsRoot == false) branch-free.
+    const int root = m_settings.useInputNoteAsRoot
+        ? (((inputNote % 12) + 12) % 12)
+        : m_settings.rootNote;
 
     triggerChordWith(out,
                      root,
@@ -527,7 +535,11 @@ void MidiChordPadProcessor::setStateInformation (const void* data, int sizeInByt
     XmlElement* mappingsElement = xml->getChildByName("MidiMappings");
     if (mappingsElement != nullptr)
     {
-        int count = mappingsElement->getIntAttribute("count", 0);
+        // PR #2 review W5: hand-edited state XML can claim any count; cap it
+        // at MAX_MIDI_MAPPINGS so a malicious value cannot run a million
+        // getChildByAttribute lookups.
+        int count = juce::jlimit(0, PluginConstants::MAX_MIDI_MAPPINGS,
+                                 mappingsElement->getIntAttribute("count", 0));
         for (int i = 0; i < count; ++i)
         {
             XmlElement* mapElement = mappingsElement->getChildByAttribute("index", String(i));

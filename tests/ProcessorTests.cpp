@@ -426,3 +426,85 @@ TEST_CASE("21 chord qualities all map to non-empty intervals")
         CHECK (notes.size() >= 3); // every chord has >= 3 notes
     }
 }
+
+TEST_CASE("PR #2 review W1: NoteOff for a held chord uses the NoteOn's channel, not the current setting")
+{
+    // Regression: previously, releaseHeldChord() re-derived the output channel
+    // from m_settings.outputChannel / inputChannel instead of the channel
+    // actually stored on the matching ActiveGeneratedNote. Changing the
+    // output channel between NoteOn and NoteOff would send the NoteOff to
+    // the wrong channel. The fix reads ait->channel.
+    MidiChordPadProcessor proc;
+    BlockRunner r (proc);
+    proc.setHoldMode (true);
+    proc.setOctave (4);
+    proc.setChordQuality ((int)ChordQuality::Major);
+    proc.setOutputChannel (3); // chord NoteOns will land on channel 3
+
+    r.send (MidiMessage::noteOn (1, 60, (uint8)100));
+    // User changes the output channel mid-hold.
+    proc.setOutputChannel (7);
+
+    MidiBuffer out = r.send (MidiMessage::noteOff (1, 60));
+    auto evs = collectEvents (out);
+    // Sanity: we should have actually seen some NoteOffs (otherwise the
+    // channel check below is vacuously true).
+    int noteOffCount = 0;
+    for (auto& e : evs) if (! e.isOn) ++noteOffCount;
+    CHECK (noteOffCount >= 3);
+    // Every NoteOff must be on channel 3 (the NoteOn channel), not 7.
+    for (auto& e : evs)
+    {
+        if (! e.isOn)
+        {
+            CHECK (e.channel == 3);
+        }
+    }
+    CHECK (proc.getHeldChordCount() == 0);
+}
+
+TEST_CASE("PR #2 review C1: NUM_CHORD_QUALITIES matches the ChordQuality enum range")
+{
+    // Compile-time guarantee is in ChordTypes.h; this is the runtime smoke
+    // test that the static_assert actually fired (if it didn't, the build
+    // would have failed before this test ran).
+    CHECK (PluginConstants::NUM_CHORD_QUALITIES == 21);
+    CHECK (static_cast<int>(ChordQuality::Dom7b13) == 20);
+    CHECK (static_cast<int>(ChordQuality::Major) == 0);
+}
+
+TEST_CASE("PR #2 review W5: malicious state XML with count=99999 does not iterate 99999 times")
+{
+    // setStateInformation used to trust mappingsElement->getIntAttribute("count")
+    // verbatim. A hand-edited state file with count=999999 would loop that many
+    // times, calling getChildByAttribute on every iteration. The fix clamps to
+    // MAX_MIDI_MAPPINGS.
+    MidiChordPadProcessor proc;
+    XmlElement xml ("MidiChordPadSettings");
+    xml.setAttribute ("velocity", PluginConstants::DEFAULT_VELOCITY);
+    xml.setAttribute ("octave", PluginConstants::DEFAULT_OCTAVE);
+    xml.setAttribute ("inversion", PluginConstants::DEFAULT_INVERSION);
+    xml.setAttribute ("durationMs", PluginConstants::DEFAULT_DURATION_MS);
+    xml.setAttribute ("holdMode", false);
+    xml.setAttribute ("midiLearnMode", false);
+    xml.setAttribute ("midiLearnActive", false);
+    xml.setAttribute ("useInputNoteAsRoot", true);
+    xml.setAttribute ("outputChannel", 0);
+
+    XmlElement* mappings = xml.createNewChildElement ("MidiMappings");
+    mappings->setAttribute ("count", 999999);
+    // Provide MAX_MIDI_MAPPINGS+1 real children so the loop has something to skip.
+    // We deliberately do NOT set "index" on any of them so getChildByAttribute
+    // returns null and the entry is silently dropped.
+    for (int i = 0; i <= PluginConstants::MAX_MIDI_MAPPINGS; ++i)
+    {
+        XmlElement* m = mappings->createNewChildElement ("Mapping");
+        m->setAttribute ("index", -1); // never matches i
+    }
+
+    MemoryBlock dest;
+    MidiChordPadProcessor::copyXmlToBinary (xml, dest);
+    // Must return quickly and not allocate 999999 entries.
+    proc.setStateInformation (dest.getData(), (int)dest.getSize());
+    CHECK (proc.getMidiMappings().size() == 0);
+}

@@ -20,29 +20,39 @@ enum class MidiRoot {
 };
 
 // Enum for chord qualities
-enum class ChordQuality { 
-    Major, 
-    Minor, 
-    Dim, 
-    Aug, 
-    Sus2, 
-    Sus4, 
-    Maj7, 
-    Min7, 
-    Dom7, 
-    Dim7, 
+// IMPORTANT: must stay in lock-step with PluginConstants::CHORD_QUALITIES[]
+// AND with PluginConstants::NUM_CHORD_QUALITIES. The static_asserts below are
+// the single source of truth for that invariant (PR #2 review C1).
+enum class ChordQuality {
+    Major,
+    Minor,
+    Dim,
+    Aug,
+    Sus2,
+    Sus4,
+    Maj7,
+    Min7,
+    Dom7,
+    Dim7,
     Min7b5,
-    Maj6, 
-    Min6, 
-    Add9, 
-    Dom9, 
-    Dom11, 
+    Maj6,
+    Min6,
+    Add9,
+    Dom9,
+    Dom11,
     Dom13,
-    Dom7b9, 
-    Dom7s9, 
-    Dom7s11, 
-    Dom7b13 
+    Dom7b9,
+    Dom7s9,
+    Dom7s11,
+    Dom7b13
 };
+
+// Compile-time guard: catches any drift between the enum and the
+// PluginConstants tables before the binary is ever produced.
+static_assert(static_cast<int>(ChordQuality::Dom7b13) == 20,
+    "ChordQuality enum out of sync with PluginConstants::NUM_CHORD_QUALITIES - 1");
+static_assert(static_cast<int>(ChordQuality::Major) == 0,
+    "ChordQuality must start at 0 so array indices line up");
 
 /**
  * Generates MIDI note numbers for a given chord.
