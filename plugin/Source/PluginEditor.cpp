@@ -8,6 +8,17 @@
 #include <set>
 
 //==============================================================================
+// Static Colour member definitions. Declared 'static const' in the header
+// (Colour's ctor is not constexpr in JUCE 7 or 8), defined here.
+//==============================================================================
+const juce::Colour MidiChordPadEditor::COLOUR_BACKGROUND     (0xFF2D2D2D);
+const juce::Colour MidiChordPadEditor::COLOUR_FOREGROUND     (0xFFFFFFFF);
+const juce::Colour MidiChordPadEditor::COLOUR_ACCENT         (0xFF007ACC);
+const juce::Colour MidiChordPadEditor::COLOUR_SELECTED       (0xFF4CAF50);
+const juce::Colour MidiChordPadEditor::COLOUR_BUTTON         (0xFF3D3D3D);
+const juce::Colour MidiChordPadEditor::COLOUR_BUTTON_HOVER   (0xFF5D5D5D);
+
+//==============================================================================
 // MidiChordPadEditor Implementation
 //==============================================================================
 

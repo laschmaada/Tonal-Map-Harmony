@@ -2,12 +2,26 @@
 # VST3 Plugin configuration
 
 # Source files
-set(PLUGIN_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginProcessor.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginEditor.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/ChordTypes.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/Source/juce_module.mm
-)
+# juce_module.mm is an Objective-C++ shim that provides JUCE 7's legacy
+# VST3 entry points on macOS. It is NOT compiled by MSVC on Windows (no
+# .mm rule), and on Windows the same entry points are provided by the
+# createPluginFilter() / createEditor() definitions in PluginProcessor.cpp.
+# We gate the file in by platform so MSVC doesn't choke on the unknown
+# extension and clang on macOS still picks it up.
+if(APPLE)
+    set(PLUGIN_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginProcessor.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginEditor.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Source/ChordTypes.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Source/juce_module.mm
+    )
+else()
+    set(PLUGIN_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginProcessor.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Source/PluginEditor.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Source/ChordTypes.cpp
+    )
+endif()
 
 # Create the plugin target
 juce_add_plugin(MidiChordPad
@@ -29,6 +43,21 @@ juce_add_plugin(MidiChordPad
     # Enable VST3 hosting
     VST3_HOSTING ON
 )
+
+# Add source files to the plugin target.
+# juce_add_plugin() does NOT auto-discover .cpp files in the CMakeLists
+# directory - the user must add them explicitly. (PLUGIN_SOURCES is defined
+# above but is NOT consumed by juce_add_plugin itself; this call wires it
+# in. Must be after juce_add_plugin because the target doesn't exist yet.)
+target_sources(MidiChordPad PRIVATE
+    ${PLUGIN_SOURCES}
+)
+
+# Generate the JuceHeader.h aggregator for this plugin target. JUCE 7
+# removed the implicit generation that older versions did; without this
+# call, plugin source files (which do '#include <JuceHeader.h>') fail
+# to find the file and the build errors with C1083.
+juce_generate_juce_header(MidiChordPad)
 
 # JUCE 7's juce_audio_plugin_client_VST3.cpp unconditionally tries to
 # include the VST2 SDK header pluginterfaces/vst2.x/vstfxstore.h when
@@ -66,6 +95,7 @@ target_link_libraries(MidiChordPad PRIVATE
 # Include directories
 target_include_directories(MidiChordPad PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Source
+    ${CMAKE_CURRENT_BINARY_DIR}/MidiChordPad_artefacts/JuceLibraryCode
 )
 
 # Compiler definitions

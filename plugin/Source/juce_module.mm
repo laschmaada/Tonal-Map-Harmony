@@ -11,12 +11,8 @@
 //==============================================================================
 // Plugin Entry Point
 //==============================================================================
-
-// This creates the plugin instance - required for JUCE VST3 hosting
-juce::PluginBundleType GetPluginBundleType()
-{
-    return juce::PluginBundleType::pluginType;
-}
+// JUCE 7 doesn't expose juce::PluginBundleType; the macOS entry point
+// is just createPluginFilter() (matching the Windows/Linux path).
 
 // Create the processor
 AudioProcessor* JUCE_CALLTYPE createPluginFilter()

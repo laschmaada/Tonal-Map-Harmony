@@ -2,7 +2,7 @@ name: Windows build
 
 on:
   push:
-    branches: [master]
+    branches: [master, fix/**, ci/**]
   pull_request:
     branches: [master]
 
@@ -41,10 +41,15 @@ jobs:
         run: |
           call scripts\build.bat
 
+      - name: Run tests
+        shell: cmd
+        run: |
+          ctest --test-dir build -C Release --output-on-failure
+
       - name: Upload VST3 artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: midi-chord-pad-vst3
-          path: build/VST3/MidiChordPad.vst3
+          path: build/VST3/VST3/MIDI Chord Pad.vst3
           if-no-files-found: error
