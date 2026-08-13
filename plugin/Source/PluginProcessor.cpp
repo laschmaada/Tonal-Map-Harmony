@@ -17,10 +17,13 @@ using namespace ChordTypes;
 //==============================================================================
 
 MidiChordPadProcessor::MidiChordPadProcessor()
-    : AudioProcessor (BusesProperties()
-                      .withInput ("MIDI Input", MidiChannel::midiChannel, true)
-                      .withOutput ("MIDI Output", MidiChannel::midiChannel, true))
+    : AudioProcessor (BusesProperties())
 {
+    // JUCE 8 removed the MidiChannel::midiChannel bus setup. MIDI I/O is
+    // configured via the juce_add_plugin() NEEDS_MIDI_INPUT / NEEDS_MIDI_OUTPUT
+    // flags and the acceptsMidi()/producesMidi()/isMidiEffect() overrides
+    // below. The empty BusesProperties() tells the host the plugin has no
+    // dedicated audio buses (it's a MIDI effect).
     // Initialize with defaults
     m_settings.velocity = PluginConstants::DEFAULT_VELOCITY;
     m_settings.octave = PluginConstants::DEFAULT_OCTAVE;
@@ -30,7 +33,7 @@ MidiChordPadProcessor::MidiChordPadProcessor()
     m_settings.rootNote = 0;
     m_settings.chordQuality = 0;
     m_settings.midiLearnMode = false;
-    
+
     // Initialize MIDI learn state
     m_midiLearnActive = false;
     m_pendingMappingNote = -1;
@@ -40,6 +43,28 @@ MidiChordPadProcessor::MidiChordPadProcessor()
 MidiChordPadProcessor::~MidiChordPadProcessor()
 {
 }
+
+//==============================================================================
+// Plugin entry points - required by JUCE 7/8 for VST3 hosting
+//==============================================================================
+
+AudioProcessorEditor* MidiChordPadProcessor::createEditor()
+{
+    return new MidiChordPadEditor (*this);
+}
+
+#if !JUCE_BUILD_STANDALONE
+// JUCE's VST3 wrapper calls createPluginFilter() to construct the processor.
+// The legacy juce_module.mm shim (which holds the JUCE 7 entry points) is
+// Objective-C++ and is not compiled by MSVC on Windows, so we MUST provide
+// createPluginFilter() here. (Keeping juce_module.mm in the source list is
+// harmless on macOS where it provides the same symbol via the @objc_entry
+// path; on Windows it's silently ignored because MSVC has no .mm rule.)
+AudioProcessor* JUCE_CALLTYPE createPluginFilter()
+{
+    return new MidiChordPadProcessor();
+}
+#endif
 
 //==============================================================================
 // AudioProcessor overrides
@@ -60,10 +85,10 @@ void MidiChordPadProcessor::releaseResources()
     m_scheduledNotes.clear();
 }
 
-void MidiChordPadProcessor::processBlock (MidiBuffer& midiMessages, const AudioProcessorStatus& status)
+void MidiChordPadProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midiMessages)
 {
     MidiBuffer outputBuffer;
-    int numSamples = status.numSamples;
+    const int numSamples = buffer.getNumSamples();
     
     // Process incoming MIDI messages
     for (const auto metadata : midiMessages)

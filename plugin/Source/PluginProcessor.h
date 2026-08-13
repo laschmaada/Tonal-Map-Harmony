@@ -4,6 +4,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "PluginConstants.h"
 
 // Forward declarations
 class MidiChordPadEditor;
@@ -71,23 +72,25 @@ public:
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override;
 
+    // JUCE 8 made getTailLengthSeconds() pure virtual. Our plugin
+    // produces no tail (all generated notes have an explicit duration
+    // or are released by NoteOff), so 0.0 is correct.
+    double getTailLengthSeconds() const override { return 0.0; }
+
     // Processing - since this is a MIDI effect, we don't process audio
     // We receive MIDI in and output generated chords
-    void processBlock (MidiBuffer& midiMessages, const AudioProcessorStatus& status) override;
+    void processBlock (AudioBuffer<float>& buffer, MidiBuffer& midiMessages) override;
 
     // Editor
     bool hasEditor() const override { return true; }
     AudioProcessorEditor* createEditor() override;
 
     // Version information
+    // JUCE 8 only exposes getName() as a pure virtual; the legacy
+    // getNameString / getVersionString / getManufacturerName* are
+    // removed. Use getName() to satisfy the override; the version
+    // and manufacturer info live in the .vst3 bundle manifest.
     const String getName() const override { return PluginConstants::PLUGIN_NAME; }
-    String getNameString() const override { return PluginConstants::PLUGIN_NAME; }
-    String getVersionString() const override { return PluginConstants::PLUGIN_VERSION; }
-    String getManufacturerName() const override { return PluginConstants::PLUGIN_MANUFACTURER; }
-    String getManufacturerNameString() const override { return PluginConstants::PLUGIN_MANUFACTURER; }
-
-    // VST3 specific
-    VST3::Category getVST3Category() override { return VST3::Category::kInstrumentMidiEffect; }
 
     // Plugin state
     bool acceptsMidi() const override { return true; }
@@ -186,6 +189,16 @@ private:
 };
 
 //==============================================================================
-// Plugin entry point - defined in juce_module.mm
+// Plugin entry points - declared here so they can be defined in
+// PluginProcessor.cpp on Windows and juce_module.mm on macOS.
 //==============================================================================
-juce::PluginBundleType GetPluginBundleType();
+
+#if !JUCE_BUILD_STANDALONE
+// Defined in PluginProcessor.cpp (Windows / Linux) and juce_module.mm
+// (macOS). The original JUCE 7 juce_module.mm shim also exposed
+// GetPluginBundleType() / createPluginEditor() / etc; those are not used
+// by the current build pipeline (createPluginFilter + createEditor in
+// PluginProcessor.cpp are sufficient for JUCE 7/8) so we don't forward
+// declare them here. If a future macOS-only feature needs them they
+// can be added back as #ifdef APPLE.
+#endif

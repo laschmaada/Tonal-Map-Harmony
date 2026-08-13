@@ -75,12 +75,17 @@ private:
     TextButton m_clearMappingsButton;
     
     // Colors
-    static constexpr Colour COLOUR_BACKGROUND = Colour (0xFF2D2D2D);
-    static constexpr Colour COLOUR_FOREGROUND = Colour (0xFFFFFFFF);
-    static constexpr Colour COLOUR_ACCENT = Colour (0xFF007ACC);
-    static constexpr Colour COLOUR_SELECTED = Colour (0xFF4CAF50);
-    static constexpr Colour COLOUR_BUTTON = Colour (0xFF3D3D3D);
-    static constexpr Colour COLOUR_BUTTON_HOVER = Colour (0xFF5D5D5D);
+    // juce::Colour's constructor is not constexpr in JUCE 7 (and is no
+    // longer constexpr in JUCE 8 either - the original PR #2 hit this
+    // when porting from JUCE 7 to 8). static const sidesteps the
+    // constexpr requirement entirely; the values are still constant
+    // expressions at runtime.
+    static const Colour COLOUR_BACKGROUND;
+    static const Colour COLOUR_FOREGROUND;
+    static const Colour COLOUR_ACCENT;
+    static const Colour COLOUR_SELECTED;
+    static const Colour COLOUR_BUTTON;
+    static const Colour COLOUR_BUTTON_HOVER;
 
     //==============================================================================
     // Private methods
