@@ -37,6 +37,9 @@ MidiChordPadProcessor::MidiChordPadProcessor()
     // Initialize MIDI learn state
     m_midiLearnActive = false;
     m_pendingMappingNote = -1;
+    m_pendingMappingChannel = 1;
+    m_pendingMappingRoot = 0;
+    m_pendingMappingQuality = 0;
     m_midiMappings.clear();
 }
 
@@ -75,6 +78,7 @@ void MidiChordPadProcessor::prepareToPlay (double sampleRate, int samplesPerBloc
     m_sampleRate = sampleRate;
     m_activeNotes.clear();
     m_playingNotes.clear();
+    m_heldChordNotes.clear();
     m_scheduledNotes.clear();
 }
 
@@ -82,6 +86,7 @@ void MidiChordPadProcessor::releaseResources()
 {
     m_activeNotes.clear();
     m_playingNotes.clear();
+    m_heldChordNotes.clear();
     m_scheduledNotes.clear();
 }
 
@@ -94,15 +99,18 @@ void MidiChordPadProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer
     for (const auto metadata : midiMessages)
     {
         const auto message = metadata.getMessage();
-        
+        const int channel = message.getChannel();  // captured once per event
+
         if (message.isNoteOn())
         {
             int noteNumber = message.getNoteNumber();
-            int channel = message.getChannel();
-            
+
             if (m_midiLearnActive)
             {
                 m_pendingMappingNote = noteNumber;
+                m_pendingMappingChannel = channel;
+                m_pendingMappingRoot = m_settings.rootNote;
+                m_pendingMappingQuality = m_settings.chordQuality;
                 continue;
             }
 
@@ -111,28 +119,47 @@ void MidiChordPadProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer
             {
                 stopAllNotes();
             }
-            
+
             if (!checkAndTriggerMapping(noteNumber))
             {
                 triggerChord(noteNumber, noteNumber, channel);
             }
-            
+
             m_activeNotes.insert(noteNumber);
         }
         else if (message.isNoteOff())
         {
             int noteNumber = message.getNoteNumber();
             m_activeNotes.erase(noteNumber);
-            
-            // Release notes triggered by this key release (mapped or unmapped)
-            // unless Hold Mode is enabled
-            if (!m_settings.holdMode)
+
+            // Hold mode release: if hold is on, look up the chord notes
+            // held by (noteNumber, channel) and emit NoteOffs for them.
+            if (m_settings.holdMode)
             {
+                HeldChordKey key{ noteNumber, channel };
+                auto it = m_heldChordNotes.find (key);
+                if (it != m_heldChordNotes.end())
+                {
+                    for (int chordNote : it->second)
+                    {
+                        if (chordNote < 0 || chordNote > 127) continue;
+                        MidiMessage noteOff (MidiMessage::noteOff (channel, chordNote, (uint8)0));
+                        m_scheduledNotes.addEvent (noteOff, 0);
+                    }
+                    m_heldChordNotes.erase (it);
+                }
+            }
+            else
+            {
+                // Non-hold release: mark all generated notes triggered by this
+                // input note for immediate release.
                 for (auto& playingNote : m_playingNotes)
                 {
-                    if (playingNote.triggerNote == noteNumber)
+                    if (playingNote.triggerNote == noteNumber
+                        && playingNote.triggerChannel == channel
+                        && playingNote.remainingSamples > 0)
                     {
-                        playingNote.remainingSamples = 0; // Trigger Note-Off in next update
+                        playingNote.remainingSamples = 0;
                     }
                 }
             }
@@ -148,16 +175,30 @@ void MidiChordPadProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer
         }
     }
 
-    // Update playing notes and generate Note-Offs
-    for (auto it = m_playingNotes.begin(); it != m_playingNotes.end();)
+    // Update playing notes and generate Note-Offs.
+    // - Hold-mode entries (remainingSamples < 0) are NOT timed out by the
+    //   scheduler; only the matching input NoteOff releases them. The
+    //   processBlock NoteOff handler below calls releaseHeldChord().
+    // - Non-hold entries have remainingSamples counted down each block; the
+    //   first block where the deadline falls emits a NoteOff.
+    for (auto it = m_playingNotes.begin(); it != m_playingNotes.end(); )
     {
+        if (it->remainingSamples < 0)
+        {
+            ++it;
+            continue;
+        }
+
         it->remainingSamples -= numSamples;
 
         if (it->remainingSamples <= 0)
         {
-            // Note has expired - send Note-Off
+            // Note has expired - send Note-Off. Place it at the original
+            // remaining-time slot if we can compute it; otherwise sample 0
+            // (at most one block of inaccuracy, simpler than tracking exact
+            // crossing sample position).
             MidiMessage noteOff = MidiMessage::noteOff(it->channel, it->noteNumber, (uint8)0);
-            outputBuffer.addEvent(noteOff, 0);
+            outputBuffer.addEvent (noteOff, 0);
             it = m_playingNotes.erase(it);
         }
         else
@@ -177,7 +218,7 @@ void MidiChordPadProcessor::getStateInformation (MemoryBlock& destData)
 {
     // Save plugin state
     XmlElement xml ("MidiChordPadSettings");
-    
+
     xml.setAttribute ("velocity", m_settings.velocity);
     xml.setAttribute ("octave", m_settings.octave);
     xml.setAttribute ("inversion", m_settings.inversion);
@@ -186,26 +227,31 @@ void MidiChordPadProcessor::getStateInformation (MemoryBlock& destData)
     xml.setAttribute ("rootNote", m_settings.rootNote);
     xml.setAttribute ("chordQuality", m_settings.chordQuality);
     xml.setAttribute ("midiLearnMode", m_settings.midiLearnMode);
-    
+
     // Save MIDI Learn state
     xml.setAttribute ("midiLearnActive", m_midiLearnActive);
-    
+
+    // Save additional settings (PR review)
+    xml.setAttribute ("useInputNoteAsRoot", m_settings.useInputNoteAsRoot);
+    xml.setAttribute ("outputChannel", m_settings.outputChannel);
+
     // Save MIDI mappings
     XmlElement* mappingsElement = xml.createNewChildElement("MidiMappings");
     mappingsElement->setAttribute ("count", (int)m_midiMappings.size());
-    
+
     for (size_t i = 0; i < m_midiMappings.size(); i++)
     {
         const auto& mapping = m_midiMappings[i];
         XmlElement* mapElement = mappingsElement->createNewChildElement("Mapping");
         mapElement->setAttribute ("index", (int)i);
         mapElement->setAttribute ("inputNote", mapping.inputNote);
+        mapElement->setAttribute ("inputChannel", mapping.inputChannel);
         mapElement->setAttribute ("rootNote", mapping.rootNote);
         mapElement->setAttribute ("chordQuality", mapping.chordQuality);
         mapElement->setAttribute ("inversion", mapping.inversion);
         mapElement->setAttribute ("octave", mapping.octave);
     }
-    
+
     // Write to memory block
     copyXmlToBinary (xml, destData);
 }
@@ -214,22 +260,24 @@ void MidiChordPadProcessor::setStateInformation (const void* data, int sizeInByt
 {
     // Restore plugin state
     std::unique_ptr<XmlElement> xml (getXmlFromBinary (data, sizeInBytes));
-    
+
     if (xml != nullptr && xml->hasTagName ("MidiChordPadSettings"))
     {
-        m_settings.velocity = xml->getIntAttribute ("velocity", PluginConstants::DEFAULT_VELOCITY);
-        m_settings.octave = xml->getIntAttribute ("octave", PluginConstants::DEFAULT_OCTAVE);
-        m_settings.inversion = xml->getIntAttribute ("inversion", PluginConstants::DEFAULT_INVERSION);
-        m_settings.durationMs = xml->getIntAttribute ("durationMs", PluginConstants::DEFAULT_DURATION_MS);
+        // All values go through the clamped setters (PR review #8) so a
+        // malformed plugin state cannot produce UB.
+        setVelocity       (xml->getIntAttribute ("velocity", PluginConstants::DEFAULT_VELOCITY));
+        setOctave         (xml->getIntAttribute ("octave", PluginConstants::DEFAULT_OCTAVE));
+        setInversion      (xml->getIntAttribute ("inversion", PluginConstants::DEFAULT_INVERSION));
+        setDurationMs     (xml->getIntAttribute ("durationMs", PluginConstants::DEFAULT_DURATION_MS));
+        setRootNote       (xml->getIntAttribute ("rootNote", 0));
+        setChordQuality   (xml->getIntAttribute ("chordQuality", 0));
         m_settings.holdMode = xml->getBoolAttribute ("holdMode", PluginConstants::DEFAULT_HOLD_MODE);
-        m_settings.rootNote = xml->getIntAttribute ("rootNote", 0);
-        m_settings.chordQuality = xml->getIntAttribute ("chordQuality", 0);
         m_settings.midiLearnMode = xml->getBoolAttribute ("midiLearnMode", false);
-        
-        // Restore MIDI Learn state
         m_midiLearnActive = xml->getBoolAttribute ("midiLearnActive", false);
-        
-        // Restore MIDI mappings
+        m_settings.useInputNoteAsRoot = xml->getBoolAttribute ("useInputNoteAsRoot", true);
+        setOutputChannel  (xml->getIntAttribute ("outputChannel", 0));
+
+        // Restore MIDI mappings (clamped)
         m_midiMappings.clear();
         XmlElement* mappingsElement = xml->getChildByName("MidiMappings");
         if (mappingsElement != nullptr)
@@ -242,11 +290,15 @@ void MidiChordPadProcessor::setStateInformation (const void* data, int sizeInByt
                 {
                     MidiMapping mapping;
                     mapping.inputNote = mapElement->getIntAttribute("inputNote", -1);
-                    mapping.rootNote = mapElement->getIntAttribute("rootNote", 0);
-                    mapping.chordQuality = mapElement->getIntAttribute("chordQuality", 0);
-                    mapping.inversion = mapElement->getIntAttribute("inversion", 0);
-                    mapping.octave = mapElement->getIntAttribute("octave", PluginConstants::DEFAULT_OCTAVE);
-                    
+                    mapping.inputChannel = juce::jlimit(1, 16, mapElement->getIntAttribute("inputChannel", 1));
+                    mapping.rootNote = ((mapElement->getIntAttribute("rootNote", 0) % 12) + 12) % 12;
+                    mapping.chordQuality = juce::jlimit(0, PluginConstants::NUM_CHORD_QUALITIES - 1,
+                                                         mapElement->getIntAttribute("chordQuality", 0));
+                    mapping.inversion = juce::jlimit(PluginConstants::MIN_INVERSION, PluginConstants::MAX_INVERSION,
+                                                      mapElement->getIntAttribute("inversion", 0));
+                    mapping.octave = juce::jlimit(PluginConstants::MIN_OCTAVE, PluginConstants::MAX_OCTAVE,
+                                                   mapElement->getIntAttribute("octave", PluginConstants::DEFAULT_OCTAVE));
+
                     if (mapping.isValid())
                     {
                         m_midiMappings.push_back(mapping);
@@ -263,12 +315,15 @@ void MidiChordPadProcessor::setStateInformation (const void* data, int sizeInByt
 
 void MidiChordPadProcessor::triggerChord(int rootMidiNote, int triggerSourceNote, int channel)
 {
-    // Determine the root for interval calculation
-    int rootNoteInOctave = rootMidiNote % 12;
-    
-    // Calculate base MIDI note based on selected output octave
-    int baseMidiNote = ((m_settings.octave + 1) * 12) + rootNoteInOctave;
-    
+    // Determine the chord root:
+    //  - useInputNoteAsRoot (default): pitch class of the incoming note
+    //  - !useInputNoteAsRoot:          m_settings.rootNote
+    const int pitchClass = ((rootMidiNote % 12) + 12) % 12;
+    const int root = m_settings.useInputNoteAsRoot ? pitchClass : m_settings.rootNote;
+
+    // Calculate base MIDI note based on selected output octave.
+    int baseMidiNote = ((m_settings.octave + 1) * 12) + root;
+
     // Get chord intervals
     const auto& intervals = ChordTypes::getChordIntervals(static_cast<ChordQuality>(m_settings.chordQuality));
 
@@ -284,22 +339,43 @@ void MidiChordPadProcessor::triggerChord(int rootMidiNote, int triggerSourceNote
         }
         std::sort(chordIntervals.begin(), chordIntervals.end());
     }
-    
+
     int durationSamples = static_cast<int>((m_settings.durationMs / 1000.0) * m_sampleRate);
-    
+
+    // Resolve output channel: explicit setting > 0 wins; otherwise mirror input.
+    const int outChannel = (m_settings.outputChannel > 0)
+        ? juce::jlimit(1, 16, m_settings.outputChannel)
+        : juce::jlimit(1, 16, channel);
+
+    // Hold-mode bookkeeping: collect generated notes so a matching input
+    // NoteOff can release them.
+    std::set<int> heldSet;
+
     for (int interval : chordIntervals)
     {
         int noteNumber = baseMidiNote + interval;
-        
+
         if (noteNumber >= 0 && noteNumber <= 127)
         {
             // Send Note-On
-            MidiMessage noteOn = MidiMessage::noteOn(channel, noteNumber, (uint8)m_settings.velocity);
+            MidiMessage noteOn = MidiMessage::noteOn(outChannel, noteNumber, (uint8)m_settings.velocity);
             m_scheduledNotes.addEvent(noteOn, 0);
-            
-            // Register for Note-Off tracking
-            m_playingNotes.emplace_back(noteNumber, channel, durationSamples, triggerSourceNote);
+
+            // Register for Note-Off tracking. Hold mode: remainingSamples=-1 so
+            // the scheduler never times it out; only the matching input NoteOff
+            // releases the chord.
+            const int remaining = m_settings.holdMode ? -1 : durationSamples;
+            m_playingNotes.emplace_back(noteNumber, outChannel, remaining,
+                                         triggerSourceNote, channel);
+            heldSet.insert(noteNumber);
         }
+    }
+
+    if (m_settings.holdMode && triggerSourceNote >= 0 && triggerSourceNote <= 127)
+    {
+        HeldChordKey key{ triggerSourceNote, channel };
+        auto& slot = m_heldChordNotes[key];
+        slot.insert(heldSet.begin(), heldSet.end());
     }
 }
 
@@ -311,10 +387,11 @@ void MidiChordPadProcessor::stopAllNotes()
         MidiMessage noteOff = MidiMessage::noteOff(note.channel, note.noteNumber, (uint8)0);
         m_scheduledNotes.addEvent(noteOff, 0);
     }
-    
+
     m_playingNotes.clear();
     m_activeNotes.clear();
     m_triggeredMappingNotes.clear();
+    m_heldChordNotes.clear();
 }
 
 //==============================================================================
@@ -325,11 +402,14 @@ void MidiChordPadProcessor::setMidiLearnActive(bool active)
 {
     m_midiLearnActive = active;
     m_settings.midiLearnMode = active;
-    
+
     if (!active)
     {
         // Cancel any pending mapping when deactivating learn mode
         m_pendingMappingNote = -1;
+        m_pendingMappingChannel = 1;
+        m_pendingMappingRoot = 0;
+        m_pendingMappingQuality = 0;
     }
 }
 
@@ -338,46 +418,100 @@ void MidiChordPadProcessor::setPendingMappingNote(int note)
     m_pendingMappingNote = note;
 }
 
+void MidiChordPadProcessor::setPendingMappingRoot(int rootNote)
+{
+    if (m_pendingMappingNote < 0) return;
+    m_pendingMappingRoot = ((rootNote % 12) + 12) % 12;
+}
+
+void MidiChordPadProcessor::setPendingMappingQuality(int quality)
+{
+    if (m_pendingMappingNote < 0) return;
+    m_pendingMappingQuality = juce::jlimit(0, PluginConstants::NUM_CHORD_QUALITIES - 1, quality);
+}
+
+void MidiChordPadProcessor::setOutputChannel(int channel)
+{
+    m_settings.outputChannel = juce::jlimit(0, 16, channel);
+}
+
+void MidiChordPadProcessor::setHoldMode(bool holdMode)
+{
+    if (m_settings.holdMode == holdMode) return;
+
+    if (!holdMode)
+    {
+        // Toggling hold off: convert every hold-mode entry into an immediate
+        // scheduled NoteOff so the next processBlock tick emits them. This
+        // matches the "toggling Hold Mode off while notes are held sends
+        // the required NoteOff messages" acceptance criterion.
+        for (auto& kv : m_heldChordNotes)
+        {
+            for (int chordNote : kv.second)
+            {
+                if (chordNote < 0 || chordNote > 127) continue;
+                for (auto& playing : m_playingNotes)
+                {
+                    if (playing.triggerNote == kv.first.note
+                        && playing.triggerChannel == kv.first.channel
+                        && playing.noteNumber == chordNote
+                        && playing.remainingSamples < 0)
+                    {
+                        playing.remainingSamples = 0;
+                        break;
+                    }
+                }
+            }
+        }
+        m_heldChordNotes.clear();
+    }
+
+    m_settings.holdMode = holdMode;
+}
+
 void MidiChordPadProcessor::completeMapping(int rootNote, int chordQuality)
 {
     // Only complete if there's a pending mapping
     if (m_pendingMappingNote < 0 || m_pendingMappingNote > 127)
         return;
-    
-    // Check if we've reached the maximum mappings
-    if (m_midiMappings.size() >= (size_t)PluginConstants::MAX_MIDI_MAPPINGS)
-    {
-        // Remove oldest mapping to make room
-        m_midiMappings.erase(m_midiMappings.begin());
-    }
-    
-    // Check for existing mapping with same input note and replace it
+
+    const int clampedRoot = ((rootNote % 12) + 12) % 12;
+    const int clampedQuality = juce::jlimit(0, PluginConstants::NUM_CHORD_QUALITIES - 1, chordQuality);
+
+    // Replace-existing-first (PR review #9): updating an existing mapping
+    // must NOT evict a different mapping to make room.
     int existingIndex = findMapping(m_pendingMappingNote);
     if (existingIndex >= 0)
     {
-        // Replace existing mapping
         m_midiMappings[existingIndex] = MidiMapping(
             m_pendingMappingNote,
-            rootNote,
-            chordQuality,
+            m_pendingMappingChannel,
+            clampedRoot,
+            clampedQuality,
             m_settings.inversion,
-            m_settings.octave
-        );
+            m_settings.octave);
     }
     else
     {
-        // Add new mapping
+        // New mapping. Only evict the oldest entry if the table is actually full.
+        if (m_midiMappings.size() >= (size_t)PluginConstants::MAX_MIDI_MAPPINGS)
+        {
+            m_midiMappings.erase(m_midiMappings.begin());
+        }
         m_midiMappings.push_back(MidiMapping(
             m_pendingMappingNote,
-            rootNote,
-            chordQuality,
+            m_pendingMappingChannel,
+            clampedRoot,
+            clampedQuality,
             m_settings.inversion,
-            m_settings.octave
-        ));
+            m_settings.octave));
     }
-    
+
     // Clear pending mapping and deactivate learn mode
     m_pendingMappingNote = -1;
+    m_pendingMappingChannel = 1;
+    m_pendingMappingRoot = 0;
+    m_pendingMappingQuality = 0;
     m_midiLearnActive = false;
     m_settings.midiLearnMode = false;
 }
@@ -386,6 +520,7 @@ void MidiChordPadProcessor::clearAllMappings()
 {
     m_midiMappings.clear();
     m_pendingMappingNote = -1;
+    m_pendingMappingChannel = 1;
     m_midiLearnActive = false;
     m_settings.midiLearnMode = false;
 }
