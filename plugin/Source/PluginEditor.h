@@ -66,11 +66,16 @@ private:
     int m_selectedRootNote = 0;
     int m_selectedChordQuality = 0;
     
-    // MIDI Learn state
+    // MIDI Learn state (PR review #1: Save / Cancel flow replaces the
+    // old "click any button to finish" behaviour).
     bool m_midiLearnMode = false;
     bool m_waitingForChordSelection = false;
     int m_pendingInputNote = -1;
-    
+
+    // Save/Cancel mapping buttons - hidden until MIDI Learn + a pending note exist.
+    TextButton m_saveMappingButton;
+    TextButton m_cancelMappingButton;
+
     // Clear mappings button
     TextButton m_clearMappingsButton;
     
@@ -113,10 +118,14 @@ private:
     void holdModeChanged();
     void midiLearnChanged();
     void clearMappingsClicked();
-    
+
+    // PR review #1: Save / Cancel buttons replace the old "click any
+    // chord button to finish" flow.
+    void saveMappingClicked();
+    void cancelMappingClicked();
+
     // MIDI Learn methods
     void startMidiLearn();
-    void finishMidiLearn();
     void cancelMidiLearn();
     bool isNoteMapped(int noteNumber) const;
     void updateMappingIndicators();

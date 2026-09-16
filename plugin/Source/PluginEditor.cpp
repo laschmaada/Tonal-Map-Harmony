@@ -65,6 +65,23 @@ MidiChordPadEditor::MidiChordPadEditor (MidiChordPadProcessor& processor)
     m_clearMappingsButton.onClick = [this]() { clearMappingsClicked(); };
     m_clearMappingsButton.setVisible (true);
     addAndMakeVisible (m_clearMappingsButton);
+
+    // Save / Cancel mapping buttons - hidden until MIDI Learn + a pending note exist.
+    m_saveMappingButton.setButtonText ("Save Mapping");
+    m_saveMappingButton.setColour (TextButton::buttonColourId, Colours::green);
+    m_saveMappingButton.setColour (TextButton::textColourOnId, Colours::white);
+    m_saveMappingButton.setColour (TextButton::textColourOffId, Colours::white);
+    m_saveMappingButton.onClick = [this]() { saveMappingClicked(); };
+    m_saveMappingButton.setVisible (false);
+    addAndMakeVisible (m_saveMappingButton);
+
+    m_cancelMappingButton.setButtonText ("Cancel");
+    m_cancelMappingButton.setColour (TextButton::buttonColourId, COLOUR_BUTTON_HOVER);
+    m_cancelMappingButton.setColour (TextButton::textColourOnId, Colours::white);
+    m_cancelMappingButton.setColour (TextButton::textColourOffId, Colours::white);
+    m_cancelMappingButton.onClick = [this]() { cancelMappingClicked(); };
+    m_cancelMappingButton.setVisible (false);
+    addAndMakeVisible (m_cancelMappingButton);
     
     // Start timer for polling MIDI learn state
     startTimer (50); // Poll every 50ms
@@ -235,8 +252,16 @@ void MidiChordPadEditor::resized()
     
     // Clear mappings button
     m_clearMappingsButton.setBounds (settingsBounds.getX() + settingsWidth + 10,
-                                    settingsBounds.getY() + (settingsHeight * 2) + 60,
+                                    settingsBounds.getY() + (settingsHeight * 2) + 90,
                                     200, 25);
+
+    // Save / Cancel mapping buttons - sit just under MIDI Learn.
+    m_saveMappingButton.setBounds (settingsBounds.getX() + settingsWidth + 10,
+                                  settingsBounds.getY() + (settingsHeight * 2) + 60,
+                                  95, 25);
+    m_cancelMappingButton.setBounds (settingsBounds.getX() + settingsWidth + 115,
+                                    settingsBounds.getY() + (settingsHeight * 2) + 60,
+                                    95, 25);
 }
 
 //==============================================================================
@@ -384,7 +409,12 @@ void MidiChordPadEditor::updateSelectedRootNote(int index)
 {
     m_selectedRootNote = index;
     m_processor.setRootNote(index);
-    
+
+    // If a mapping is in progress, update the pending mapping's root so
+    // Save Mapping captures what the user just clicked.
+    if (m_midiLearnMode && m_processor.getPendingMappingNote() >= 0)
+        m_processor.setPendingMappingRoot (index);
+
     // Update button states
     for (int i = 0; i < 12; i++)
     {
@@ -396,7 +426,10 @@ void MidiChordPadEditor::updateSelectedChordQuality(int index)
 {
     m_selectedChordQuality = index;
     m_processor.setChordQuality(index);
-    
+
+    if (m_midiLearnMode && m_processor.getPendingMappingNote() >= 0)
+        m_processor.setPendingMappingQuality (index);
+
     // Update button states
     for (size_t i = 0; i < m_chordQualityButtons.size(); i++)
     {
@@ -410,28 +443,15 @@ void MidiChordPadEditor::updateSelectedChordQuality(int index)
 
 void MidiChordPadEditor::onRootNoteClicked(int noteIndex)
 {
-    // If in MIDI learn mode and waiting for chord selection, complete the mapping
-    if (m_midiLearnMode && m_pendingInputNote >= 0)
-    {
-        finishMidiLearn();
-    }
-    else
-    {
-        updateSelectedRootNote(noteIndex);
-    }
+    // PR review #1: always apply the click to the UI selection, then update
+    // the pending mapping's root (if a mapping is in progress). Never
+    // finalise the mapping on this click.
+    updateSelectedRootNote(noteIndex);
 }
 
 void MidiChordPadEditor::onChordQualityClicked(int qualityIndex)
 {
-    // If in MIDI learn mode and waiting for chord selection, complete the mapping
-    if (m_midiLearnMode && m_pendingInputNote >= 0)
-    {
-        finishMidiLearn();
-    }
-    else
-    {
-        updateSelectedChordQuality(qualityIndex);
-    }
+    updateSelectedChordQuality(qualityIndex);
 }
 
 void MidiChordPadEditor::octaveSliderChanged()
@@ -493,50 +513,33 @@ void MidiChordPadEditor::startMidiLearn()
     m_midiLearnMode = true;
     m_waitingForChordSelection = false;
     m_pendingInputNote = -1;
-    
+
     // Update button appearance
     m_midiLearnButton.setButtonText ("Press a note...");
     m_midiLearnButton.setColour (TextButton::buttonOnColourId, COLOUR_SELECTED); // Green
-    
+
+    // Save / Cancel stay hidden until a pending note is captured.
+    m_saveMappingButton.setVisible (false);
+    m_cancelMappingButton.setVisible (false);
+
     m_processor.setMidiLearnActive(true);
 }
 
 void MidiChordPadEditor::timerCallback()
 {
-    // Check if there's a pending MIDI note from the processor
-    if (m_midiLearnMode && m_pendingInputNote < 0)
+    // Poll the processor for pending state changes and refresh UI.
+    if (m_midiLearnMode)
     {
-        int pendingNote = m_processor.getPendingMappingNote();
-        if (pendingNote >= 0)
+        const int pendingNote = m_processor.getPendingMappingNote();
+        if (pendingNote >= 0 && m_pendingInputNote < 0)
         {
             m_pendingInputNote = pendingNote;
             m_waitingForChordSelection = true;
-            
-            // Update button to show we're waiting for chord selection
-            m_midiLearnButton.setButtonText ("Select a chord...");
+            m_midiLearnButton.setButtonText ("Select a chord, then Save Mapping");
         }
-    }
-}
-
-void MidiChordPadEditor::finishMidiLearn()
-{
-    if (m_pendingInputNote >= 0)
-    {
-        // Complete the mapping with current chord selection
-        m_processor.completeMapping(m_selectedRootNote, m_selectedChordQuality);
-        
-        // Reset UI state
-        m_midiLearnMode = false;
-        m_waitingForChordSelection = false;
-        m_pendingInputNote = -1;
-        
-        // Update button appearance
-        m_midiLearnButton.setToggleState(false, dontSendNotification);
-        m_midiLearnButton.setButtonText ("Enable MIDI Learn");
-        m_midiLearnButton.setColour (TextButton::buttonOnColourId, COLOUR_ACCENT);
-        
-        // Update mapping indicators
-        updateMappingIndicators();
+        // Reveal Save / Cancel as soon as we have a pending note.
+        m_saveMappingButton.setVisible (pendingNote >= 0);
+        m_cancelMappingButton.setVisible (pendingNote >= 0);
     }
 }
 
@@ -545,12 +548,31 @@ void MidiChordPadEditor::cancelMidiLearn()
     m_midiLearnMode = false;
     m_waitingForChordSelection = false;
     m_pendingInputNote = -1;
-    
+
     // Reset button appearance
     m_midiLearnButton.setButtonText ("Enable MIDI Learn");
     m_midiLearnButton.setColour (TextButton::buttonOnColourId, COLOUR_ACCENT);
-    
+    m_midiLearnButton.setToggleState (false, dontSendNotification);
+
+    // Hide Save/Cancel buttons
+    m_saveMappingButton.setVisible (false);
+    m_cancelMappingButton.setVisible (false);
+
     m_processor.setMidiLearnActive(false);
+}
+
+void MidiChordPadEditor::saveMappingClicked()
+{
+    if (m_pendingInputNote >= 0)
+    {
+        m_processor.completeMapping (m_selectedRootNote, m_selectedChordQuality);
+        cancelMidiLearn();
+    }
+}
+
+void MidiChordPadEditor::cancelMappingClicked()
+{
+    cancelMidiLearn();
 }
 
 bool MidiChordPadEditor::isNoteMapped(int noteNumber) const

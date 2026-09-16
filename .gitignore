@@ -52,3 +52,5 @@ CTestTestfile.cmake
 *.ilk
 *.pdb
 *.idb
+/.claude/
+/.kilocode/
