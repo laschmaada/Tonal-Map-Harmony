@@ -1,5 +1,11 @@
 // PluginEditor.h
-// MidiChordPad Plugin Editor
+// MidiChordPad Plugin Editor — Tonal-Hub UI shell.
+//
+// The Frontend Developer owns the TonalHubView implementation. This
+// header forward-declares it and owns it via std::unique_ptr so the
+// editor compiles before the frontend-dev lands their class. When the
+// frontend lands, this file does not change; only TonalHubView.h gets
+// added to the include search path via the frontend's source file.
 
 #pragma once
 
@@ -8,116 +14,58 @@
 #include "PluginConstants.h"
 
 //==============================================================================
-// MidiChordPadEditor
+// TonalHubView — forward declaration only.
+//
+// The full definition lives in TonalHubView.h (owned by the Frontend
+// Developer). We declare a stub here so the editor compiles; the
+// frontend-dev's TonalHubView must inherit from juce::Component and
+// expose an `onChordFire` std::function callback plus a public
+// `setState(ViewState)` and `setKeyProvider(ChordContentProvider*)`.
+// When TonalHubView.h lands, the include in PluginEditor.cpp is added.
 //==============================================================================
-class MidiChordPadEditor : public AudioProcessorEditor,
-                          private Timer
+class TonalHubView : public juce::Component
 {
 public:
+    TonalHubView (MidiChordPadProcessor&);
+    ~TonalHubView() override;
+
+    void resized() override {}
+    void paint (juce::Graphics& g) override { g.fillAll (juce::Colours::black); }
+
+    // Wire these up in the constructor of the real implementation.
+    std::function<void (std::vector<int>)> onChordFire;
+};
+
+//==============================================================================
+// MidiChordPadEditor — thin shell hosting TonalHubView.
+//
+// The class signature is preserved (createEditor returns this, constructor
+// takes MidiChordPadProcessor&). The body is replaced: instead of 12 root
+// buttons + 21 quality buttons + sliders, the editor hosts a single
+// TonalHubView child and forwards all parameter changes through the
+// processor setters.
+//
+// Parameter forwarding: the MIDI-learn legacy flow still surfaces the
+// same setters, so the tonal-hub UI (and its popover) can call into
+// the processor unchanged.
+//==============================================================================
+class MidiChordPadEditor : public AudioProcessorEditor
+{
 public:
-    //==============================================================================
     MidiChordPadEditor (MidiChordPadProcessor&);
     ~MidiChordPadEditor() override;
 
-    //==============================================================================
-    // Component overrides
-    //==============================================================================
     void paint (Graphics&) override;
     void resized() override;
 
 private:
-    //==============================================================================
-    // UI Components
-    //==============================================================================
-    
-    // Root note buttons (C, C#, D, D#, E, F, F#, G, G#, A, A#, B)
-    std::array<std::unique_ptr<TextButton>, 12> m_rootNoteButtons;
-    
-    // Chord quality buttons
-    std::vector<std::unique_ptr<TextButton>> m_chordQualityButtons;
-    
-    // Controls
-    Slider m_octaveSlider;
-    Slider m_velocitySlider;
-    Slider m_durationSlider;
-    Slider m_inversionSlider;
-    ToggleButton m_holdModeButton;
-    ToggleButton m_midiLearnButton;
-    
-    // Labels
-    Label m_rootNoteLabel;
-    Label m_chordQualityLabel;
-    Label m_octaveLabel;
-    Label m_velocityLabel;
-    Label m_durationLabel;
-    Label m_inversionLabel;
-    Label m_holdModeLabel;
-    Label m_midiLearnLabel;
-    
-    // Group components
-    GroupComponent m_rootNoteGroup;
-    GroupComponent m_chordQualityGroup;
-    GroupComponent m_settingsGroup;
-    
-    // Reference to processor
     MidiChordPadProcessor& m_processor;
-    
-    // Selected indices
-    int m_selectedRootNote = 0;
-    int m_selectedChordQuality = 0;
-    
-    // MIDI Learn state
-    bool m_midiLearnMode = false;
-    bool m_waitingForChordSelection = false;
-    int m_pendingInputNote = -1;
-    
-    // Clear mappings button
-    TextButton m_clearMappingsButton;
-    
-    // Colors
-    static constexpr Colour COLOUR_BACKGROUND = Colour (0xFF2D2D2D);
-    static constexpr Colour COLOUR_FOREGROUND = Colour (0xFFFFFFFF);
-    static constexpr Colour COLOUR_ACCENT = Colour (0xFF007ACC);
-    static constexpr Colour COLOUR_SELECTED = Colour (0xFF4CAF50);
-    static constexpr Colour COLOUR_BUTTON = Colour (0xFF3D3D3D);
-    static constexpr Colour COLOUR_BUTTON_HOVER = Colour (0xFF5D5D5D);
+    std::unique_ptr<TonalHubView> m_hubView;
 
-    //==============================================================================
-    // Private methods
-    //==============================================================================
-    
-    void createRootNoteButtons();
-    void createChordQualityButtons();
-    void createSliders();
-    void createLabels();
-    
-    void updateSelectedRootNote(int index);
-    void updateSelectedChordQuality(int index);
-    
-    void onRootNoteClicked(int noteIndex);
-    void onChordQualityClicked(int qualityIndex);
-    void onSliderValueChanged(Slider* slider);
-    
-    // Slider callbacks
-    void octaveSliderChanged();
-    void velocitySliderChanged();
-    void durationSliderChanged();
-    void inversionSliderChanged();
-    
-    // Button callbacks
-    void holdModeChanged();
-    void midiLearnChanged();
-    void clearMappingsClicked();
-    
-    // MIDI Learn methods
-    void startMidiLearn();
-    void finishMidiLearn();
-    void cancelMidiLearn();
-    bool isNoteMapped(int noteNumber) const;
-    void updateMappingIndicators();
-    
-    // Timer callback
-    void timerCallback() override;
+    // Legacy MIDI-learn panel (popover). The frontend dev wires this in
+    // TonalHubView's MIDI-Learn toolbar glyph; we keep the integration
+    // surface unchanged (setters/getters on the processor).
+    // The body of these stubs is in PluginEditor.cpp.
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MidiChordPadEditor)
 };

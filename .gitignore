@@ -52,3 +52,7 @@ CTestTestfile.cmake
 *.ilk
 *.pdb
 *.idb
+
+# Tooling-local scratch
+/.claude/
+/.kilocode/
