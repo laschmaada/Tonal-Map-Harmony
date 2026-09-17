@@ -40,10 +40,18 @@ namespace
             return in;
         }
 
-        MidiBuffer tick()
+        MidiBuffer tick (int numSamplesInBlock = -1)
         {
             MidiBuffer empty;
-            proc.processBlock (dummy, empty);
+            if (numSamplesInBlock >= 0)
+            {
+                AudioBuffer<float> sized (2, numSamplesInBlock);
+                proc.processBlock (sized, empty);
+            }
+            else
+            {
+                proc.processBlock (dummy, empty);
+            }
             return empty;
         }
     };
@@ -223,6 +231,145 @@ TEST_CASE("NoteOn at a non-zero sample offset produces NoteOns at the same offse
     for (auto& e : evs)
         if (e.isOn && e.sampleOffset == 240) anyOnAt240 = true;
     CHECK (anyOnAt240);
+}
+
+TEST_CASE("Every mapped and unmapped chord tone preserves its input offset")
+{
+    for (bool mapped : { false, true })
+    {
+        for (int offset : { 0, 1, 240, 511 })
+        {
+            CAPTURE(mapped);
+            CAPTURE(offset);
+            MidiChordPadProcessor proc;
+            BlockRunner r(proc);
+            proc.setHoldMode(true);
+            proc.setOctave(4);
+            proc.setChordQuality((int)ChordQuality::Major);
+            // Reviewer strengthening: mapped path must produce a DISTINCT
+            // chord (Dm7), so a bypassed mapping lookup cannot pass.
+            const std::vector<int> expected = mapped
+                ? std::vector<int>{ 62, 65, 69, 72 }   // D4 F4 A4 C5 (Dm7)
+                : std::vector<int>{ 60, 64, 67 };      // C4 E4 G4 (Cmaj)
+            if (mapped)
+            {
+                proc.setPendingMappingNote(60);
+                proc.completeMapping(2, (int)ChordQuality::Min7);
+            }
+            const auto events = collectEvents(r.send(MidiMessage::noteOn(1, 60, (uint8)100), offset));
+            REQUIRE(events.size() == (int)expected.size());
+            for (size_t i = 0; i < events.size(); ++i)
+            {
+                CHECK(events[i].isOn);
+                CHECK(events[i].note == expected[i]);
+                CHECK(events[i].sampleOffset == offset);
+            }
+        }
+    }
+}
+
+TEST_CASE("Same-block hold release follows its delayed NoteOn")
+{
+    MidiChordPadProcessor proc;
+    BlockRunner r(proc);
+    proc.setHoldMode(true);
+    proc.setOctave(4);
+    proc.setChordQuality((int)ChordQuality::Major);
+    MidiBuffer input;
+    input.addEvent(MidiMessage::noteOn(1, 60, (uint8)100), 240);
+    input.addEvent(MidiMessage::noteOff(1, 60), 400);
+    proc.processBlock(r.dummy, input);
+    const auto events = collectEvents(input);
+    REQUIRE(events.size() == 6);
+    const int pitches[] = { 60, 64, 67 };
+    for (size_t i = 0; i < events.size(); ++i)
+    {
+        CHECK(events[i].isOn == (i < 3));
+        CHECK(events[i].sampleOffset == (i < 3 ? 240 : 400));
+        CHECK(events[i].note == pitches[i % 3]);
+    }
+    CHECK(proc.getHeldChordCount() == 0);
+    CHECK(r.tick().isEmpty());
+}
+
+TEST_CASE("Same-block retrigger and panic release at the input event offset")
+{
+    for (bool panic : { false, true })
+    {
+        CAPTURE(panic);
+        MidiChordPadProcessor proc;
+        BlockRunner r(proc);
+        proc.setHoldMode(panic);
+        proc.setOctave(4);
+        proc.setChordQuality((int)ChordQuality::Major);
+        MidiBuffer input;
+        input.addEvent(MidiMessage::noteOn(1, 60, (uint8)100), 240);
+        input.addEvent(panic ? MidiMessage::controllerEvent(1, 123, 0)
+                             : MidiMessage::noteOn(1, 60, (uint8)100), 400);
+        proc.processBlock(r.dummy, input);
+        const auto events = collectEvents(input);
+        REQUIRE(events.size() == (panic ? 6 : 9));
+        const int pitches[] = { 60, 64, 67 };
+        for (size_t i = 0; i < events.size(); ++i)
+        {
+            // At retrigger time the old chord must release BEFORE the new
+            // NoteOns, even when they have the same pitches and timestamp.
+            CHECK(events[i].isOn == (i < 3 || i >= 6));
+            CHECK(events[i].sampleOffset == (i < 3 ? 240 : 400));
+            CHECK(events[i].note == pitches[i % 3]);
+        }
+        CHECK(proc.getHeldChordCount() == 0);
+        CHECK(proc.getPlayingNotes().size() == (panic ? 0 : 3));
+        CHECK(r.tick().isEmpty());
+    }
+}
+
+TEST_CASE("Multiple chord triggers retain distinct offsets in one block")
+{
+    MidiChordPadProcessor proc;
+    BlockRunner r(proc);
+    proc.setHoldMode(true);
+    proc.setOctave(4);
+    proc.setChordQuality((int)ChordQuality::Major);
+    MidiBuffer input;
+    input.addEvent(MidiMessage::noteOn(1, 60, (uint8)100), 17);
+    input.addEvent(MidiMessage::noteOn(1, 62, (uint8)100), 400);
+    proc.processBlock(r.dummy, input);
+    const auto events = collectEvents(input);
+    REQUIRE(events.size() == 6);
+    for (size_t i = 0; i < events.size(); ++i)
+    {
+        CHECK(events[i].isOn);
+        CHECK(events[i].sampleOffset == (i < 3 ? 17 : 400));
+    }
+}
+
+TEST_CASE("Cross-block: zero-sample callback must not drop queued releases")
+{
+    MidiChordPadProcessor proc;
+    BlockRunner r (proc);
+    proc.setHoldMode (false);
+    proc.setOctave (4);
+    proc.setChordQuality ((int)ChordQuality::Major);
+
+    // Chord sounds and fully expires in its creation block.
+    r.send (MidiMessage::noteOn (1, 60, (uint8)100));
+    r.tick();
+
+    // Host calls stopAllNotes outside the audio callback between blocks:
+    // the processor queues NoteOffs at sample 0 and clears its tracking.
+    proc.stopAllNotes();
+    CHECK (proc.getPlayingNotes().size() == 0);
+
+    // Next callback is a zero-sample buffer (JUCE permits this). The queued
+    // NoteOffs must survive it and be emitted by a later real callback.
+    CHECK (r.tick (0).isEmpty());
+
+    MidiBuffer out = r.tick();
+    auto evs = collectEvents (out);
+    CHECK (hasNoteOff (evs, 60, 1));
+    CHECK (hasNoteOff (evs, 64, 1));
+    CHECK (hasNoteOff (evs, 67, 1));
 }
 
 TEST_CASE("CC 123 / All Notes Off releases every generated note")

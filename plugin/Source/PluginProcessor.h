@@ -153,10 +153,10 @@ public:
     void setOutputChannel(int channel); // 0 = mirror input, 1-16 = fixed
     
     // Trigger chord output
-    void triggerChord(int rootMidiNote, int triggerSourceNote = -1, int channel = 1);
+    void triggerChord(int rootMidiNote, int triggerSourceNote = -1, int channel = 1, int sampleOffset = 0);
     
     // Stop all playing notes
-    void stopAllNotes();
+    void stopAllNotes(int sampleOffset = 0);
     
     //==============================================================================
     // MIDI Learn / Mapping methods
@@ -193,7 +193,7 @@ public:
     int findMapping(int inputNote) const;
 
     // Check if note has mapping and trigger if so
-    bool checkAndTriggerMapping(int inputNote);
+    bool checkAndTriggerMapping(int inputNote, int sampleOffset = 0);
 
     // Read-only access for tests.
     size_t getHeldChordCount() const { return m_heldChordNotes.size(); }

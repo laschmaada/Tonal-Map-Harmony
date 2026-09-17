@@ -35,7 +35,10 @@ juce_add_plugin(MidiChordPad
 
 
     # VST3-specific settings
-    VST3_CATEGORY "Instrument|MidiEffect"
+    VST3_CATEGORIES Fx Tools
+    NEEDS_MIDI_INPUT TRUE
+    NEEDS_MIDI_OUTPUT TRUE
+    IS_MIDI_EFFECT TRUE
 
     # Plugin is a MIDI effect (no audio inputs/outputs)
     FORMATS VST3

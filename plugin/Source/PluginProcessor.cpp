@@ -92,9 +92,20 @@ void MidiChordPadProcessor::releaseResources()
 
 void MidiChordPadProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer& midiMessages)
 {
-    MidiBuffer outputBuffer;
     const int numSamples = buffer.getNumSamples();
-    
+
+    // JUCE explicitly permits zero-sample callbacks. Time does not advance
+    // in such a callback: leave the input untouched and keep queued events
+    // (m_scheduledNotes) and scheduler deadlines intact so a later
+    // positive-length callback emits them. Merging with a [0, 0) range
+    // followed by clear() would permanently destroy queued releases.
+    if (numSamples <= 0)
+    {
+        return;
+    }
+
+    MidiBuffer outputBuffer;
+
     // Process incoming MIDI messages
     for (const auto metadata : midiMessages)
     {
@@ -117,12 +128,12 @@ void MidiChordPadProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer
             // If not in hold mode, stop previous notes before starting new ones
             if (!m_settings.holdMode)
             {
-                stopAllNotes();
+                stopAllNotes(metadata.samplePosition);
             }
 
-            if (!checkAndTriggerMapping(noteNumber))
+            if (!checkAndTriggerMapping(noteNumber, metadata.samplePosition))
             {
-                triggerChord(noteNumber, noteNumber, channel);
+                triggerChord(noteNumber, noteNumber, channel, metadata.samplePosition);
             }
 
             m_activeNotes.insert(noteNumber);
@@ -144,7 +155,7 @@ void MidiChordPadProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer
                     {
                         if (chordNote < 0 || chordNote > 127) continue;
                         MidiMessage noteOff (MidiMessage::noteOff (channel, chordNote, (uint8)0));
-                        m_scheduledNotes.addEvent (noteOff, 0);
+                        m_scheduledNotes.addEvent (noteOff, metadata.samplePosition);
                     }
                     m_heldChordNotes.erase (it);
                 }
@@ -171,7 +182,7 @@ void MidiChordPadProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer
         }
         else if (message.isAllNotesOff() || (message.isController() && message.getControllerNumber() == 123))
         {
-            stopAllNotes();
+            stopAllNotes(metadata.samplePosition);
         }
     }
 
@@ -208,7 +219,7 @@ void MidiChordPadProcessor::processBlock (AudioBuffer<float>& buffer, MidiBuffer
     }
     
     // Add any immediate notes from triggerChord (Note-Ons)
-    outputBuffer.addEvents(m_scheduledNotes, 0, m_scheduledNotes.getNumEvents(), 0);
+    outputBuffer.addEvents(m_scheduledNotes, 0, numSamples, 0);
     m_scheduledNotes.clear();
     
     midiMessages.swapWith(outputBuffer);
@@ -313,7 +324,7 @@ void MidiChordPadProcessor::setStateInformation (const void* data, int sizeInByt
 // Custom methods
 //==============================================================================
 
-void MidiChordPadProcessor::triggerChord(int rootMidiNote, int triggerSourceNote, int channel)
+void MidiChordPadProcessor::triggerChord(int rootMidiNote, int triggerSourceNote, int channel, int sampleOffset)
 {
     // Determine the chord root:
     //  - useInputNoteAsRoot (default): pitch class of the incoming note
@@ -359,7 +370,7 @@ void MidiChordPadProcessor::triggerChord(int rootMidiNote, int triggerSourceNote
         {
             // Send Note-On
             MidiMessage noteOn = MidiMessage::noteOn(outChannel, noteNumber, (uint8)m_settings.velocity);
-            m_scheduledNotes.addEvent(noteOn, 0);
+            m_scheduledNotes.addEvent(noteOn, sampleOffset);
 
             // Register for Note-Off tracking. Hold mode: remainingSamples=-1 so
             // the scheduler never times it out; only the matching input NoteOff
@@ -379,13 +390,13 @@ void MidiChordPadProcessor::triggerChord(int rootMidiNote, int triggerSourceNote
     }
 }
 
-void MidiChordPadProcessor::stopAllNotes()
+void MidiChordPadProcessor::stopAllNotes(int sampleOffset)
 {
     // Send Note-Off for all currently playing notes
     for (const auto& note : m_playingNotes)
     {
         MidiMessage noteOff = MidiMessage::noteOff(note.channel, note.noteNumber, (uint8)0);
-        m_scheduledNotes.addEvent(noteOff, 0);
+        m_scheduledNotes.addEvent(noteOff, sampleOffset);
     }
 
     m_playingNotes.clear();
@@ -542,7 +553,7 @@ int MidiChordPadProcessor::findMapping(int inputNote) const
     return -1;
 }
 
-bool MidiChordPadProcessor::checkAndTriggerMapping(int inputNote)
+bool MidiChordPadProcessor::checkAndTriggerMapping(int inputNote, int sampleOffset)
 {
     int mappingIndex = findMapping(inputNote);
     if (mappingIndex < 0)
@@ -564,7 +575,7 @@ bool MidiChordPadProcessor::checkAndTriggerMapping(int inputNote)
     m_settings.octave = mapping.octave;
     
     // Trigger the chord
-    triggerChord(mapping.rootNote, inputNote, channel);
+    triggerChord(mapping.rootNote, inputNote, channel, sampleOffset);
     
     // Restore original settings
     m_settings.rootNote = savedRootNote;
